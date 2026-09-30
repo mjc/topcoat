@@ -3133,6 +3133,7 @@ dependencies = [
  "topcoat-htmx",
  "topcoat-icon",
  "topcoat-icon-macro",
+ "topcoat-l10n",
  "topcoat-mail",
  "topcoat-mail-macro",
  "topcoat-router",
@@ -3366,6 +3367,14 @@ dependencies = [
 [[package]]
 name = "topcoat-l10n"
 version = "0.9.0"
+dependencies = [
+ "http",
+ "icu_locale_core",
+ "tokio",
+ "topcoat",
+ "topcoat-core",
+ "topcoat-router",
+]
 
 [[package]]
 name = "topcoat-mail"
