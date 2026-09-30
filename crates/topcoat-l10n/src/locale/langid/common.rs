@@ -5,16 +5,14 @@ use std::{
     fmt::{self, Debug},
 };
 
-/// A fixed-capacity ASCII alphanumeric string.
+/// A fixed-capacity ASCII alphanumeric string, padded with NUL bytes.
 ///
-/// Comparisons and hashing use the stored bytes, so two buffers with the same
-/// text are equal, and a shorter text sorts before a longer one with the same
-/// prefix.
+/// The layout matches ICU4X's subtag storage, so the raw bytes convert to its
+/// types directly. Comparisons and hashing use the stored bytes, so two
+/// buffers with the same text are equal, and a shorter text sorts before a
+/// longer one with the same prefix.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Buffer<const N: usize> {
-    bytes: [u8; N],
-    len: u8,
-}
+pub(crate) struct Buffer<const N: usize>([u8; N]);
 
 impl<const N: usize> Buffer<N> {
     /// Copies `bytes` into a buffer. Returns `None` when the text is empty,
@@ -32,32 +30,37 @@ impl<const N: usize> Buffer<N> {
             stored[index] = bytes[index];
             index += 1;
         }
-        Some(Self {
-            bytes: stored,
-            // The length check above keeps this within `u8` for any capacity
-            // a subtag needs.
-            #[expect(clippy::cast_possible_truncation, reason = "bounded by N")]
-            len: bytes.len() as u8,
-        })
+        Some(Self(stored))
+    }
+
+    /// Returns the stored bytes, NUL padded to the capacity.
+    pub(crate) const fn into_raw(self) -> [u8; N] {
+        self.0
     }
 
     pub(crate) const fn as_str(&self) -> &str {
-        let (text, _) = self.bytes.split_at(self.len as usize);
+        let (text, _) = self.0.split_at(self.len());
         match str::from_utf8(text) {
             Ok(text) => text,
             Err(_) => unreachable!(),
         }
     }
 
+    /// Returns the length of the text: the position of the first NUL byte,
+    /// or the capacity when there is none.
     pub(crate) const fn len(&self) -> usize {
-        self.len as usize
+        let mut index = 0;
+        while index < N && self.0[index] != 0 {
+            index += 1;
+        }
+        index
     }
 
     /// Returns whether every byte is an ASCII letter.
     pub(crate) const fn is_alphabetic(&self) -> bool {
         let mut index = 0;
         while index < self.len() {
-            if !self.bytes[index].is_ascii_alphabetic() {
+            if !self.0[index].is_ascii_alphabetic() {
                 return false;
             }
             index += 1;
@@ -69,7 +72,7 @@ impl<const N: usize> Buffer<N> {
     pub(crate) const fn is_numeric(&self) -> bool {
         let mut index = 0;
         while index < self.len() {
-            if !self.bytes[index].is_ascii_digit() {
+            if !self.0[index].is_ascii_digit() {
                 return false;
             }
             index += 1;
@@ -79,7 +82,7 @@ impl<const N: usize> Buffer<N> {
 
     /// Returns whether the first byte is an ASCII digit.
     pub(crate) const fn starts_with_digit(&self) -> bool {
-        self.bytes[0].is_ascii_digit()
+        self.0[0].is_ascii_digit()
     }
 
     /// Compares the texts byte by byte, like the derived `Ord`, for use in
@@ -87,10 +90,10 @@ impl<const N: usize> Buffer<N> {
     pub(crate) const fn compare(&self, other: &Self) -> Ordering {
         let mut index = 0;
         while index < N {
-            if self.bytes[index] < other.bytes[index] {
+            if self.0[index] < other.0[index] {
                 return Ordering::Less;
             }
-            if self.bytes[index] > other.bytes[index] {
+            if self.0[index] > other.0[index] {
                 return Ordering::Greater;
             }
             index += 1;
@@ -101,7 +104,7 @@ impl<const N: usize> Buffer<N> {
     pub(crate) const fn to_lowercase(mut self) -> Self {
         let mut index = 0;
         while index < self.len() {
-            self.bytes[index] = self.bytes[index].to_ascii_lowercase();
+            self.0[index] = self.0[index].to_ascii_lowercase();
             index += 1;
         }
         self
@@ -110,7 +113,7 @@ impl<const N: usize> Buffer<N> {
     pub(crate) const fn to_uppercase(mut self) -> Self {
         let mut index = 0;
         while index < self.len() {
-            self.bytes[index] = self.bytes[index].to_ascii_uppercase();
+            self.0[index] = self.0[index].to_ascii_uppercase();
             index += 1;
         }
         self
@@ -119,7 +122,7 @@ impl<const N: usize> Buffer<N> {
     /// Upper-cases the first byte and lower-cases the rest.
     pub(crate) const fn to_titlecase(self) -> Self {
         let mut buffer = self.to_lowercase();
-        buffer.bytes[0] = buffer.bytes[0].to_ascii_uppercase();
+        buffer.0[0] = buffer.0[0].to_ascii_uppercase();
         buffer
     }
 }
