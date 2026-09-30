@@ -1,7 +1,7 @@
-mod config;
-mod locale;
-mod subtags;
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub use config::*;
+//! Localization for Topcoat.
+
+mod locale;
+
 pub use locale::*;
-pub use subtags::*;
