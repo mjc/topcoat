@@ -33,6 +33,12 @@ impl<const N: usize> Buffer<N> {
         Some(Self(stored))
     }
 
+    /// Wraps bytes that are already valid: ASCII alphanumeric text followed by
+    /// NUL padding, as produced by [`into_raw`](Self::into_raw) or by ICU4X.
+    pub(crate) const fn from_raw(bytes: [u8; N]) -> Self {
+        Self(bytes)
+    }
+
     /// Returns the stored bytes, NUL padded to the capacity.
     pub(crate) const fn into_raw(self) -> [u8; N] {
         self.0

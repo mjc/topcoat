@@ -34,6 +34,22 @@ impl Script {
     pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    /// Converts to the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn to_icu(self) -> icu_locale_core::subtags::Script {
+        // Both types accept the same canonical text.
+        match icu_locale_core::subtags::Script::try_from_raw(self.0.into_raw()) {
+            Ok(script) => script,
+            Err(_) => unreachable!(),
+        }
+    }
+
+    /// Converts from the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn from_icu(script: icu_locale_core::subtags::Script) -> Self {
+        Self(Buffer::from_raw(script.into_raw()))
+    }
 }
 
 impl AsRef<str> for Script {

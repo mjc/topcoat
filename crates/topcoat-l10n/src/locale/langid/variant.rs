@@ -38,6 +38,22 @@ impl Variant {
         self.0.as_str()
     }
 
+    /// Converts to the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn to_icu(self) -> icu_locale_core::subtags::Variant {
+        // Both types accept the same canonical text.
+        match icu_locale_core::subtags::Variant::try_from_raw(self.0.into_raw()) {
+            Ok(variant) => variant,
+            Err(_) => unreachable!(),
+        }
+    }
+
+    /// Converts from the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn from_icu(variant: icu_locale_core::subtags::Variant) -> Self {
+        Self(Buffer::from_raw(variant.into_raw()))
+    }
+
     /// Compares two variants like `Ord`, for use in const context.
     pub(crate) const fn compare(&self, other: &Self) -> std::cmp::Ordering {
         self.0.compare(&other.0)

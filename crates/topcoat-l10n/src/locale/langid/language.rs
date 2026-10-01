@@ -46,6 +46,22 @@ impl Language {
     pub const fn is_unknown(&self) -> bool {
         matches!(self.as_str().as_bytes(), b"und")
     }
+
+    /// Converts to the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn to_icu(self) -> icu_locale_core::subtags::Language {
+        // Both types accept the same canonical text.
+        match icu_locale_core::subtags::Language::try_from_raw(self.0.into_raw()) {
+            Ok(language) => language,
+            Err(_) => unreachable!(),
+        }
+    }
+
+    /// Converts from the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn from_icu(language: icu_locale_core::subtags::Language) -> Self {
+        Self(Buffer::from_raw(language.into_raw()))
+    }
 }
 
 impl AsRef<str> for Language {

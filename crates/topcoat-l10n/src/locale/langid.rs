@@ -209,6 +209,47 @@ impl LanguageIdentifier {
         self.variants = [None; MAX_VARIANTS];
         self
     }
+
+    /// Converts to the `icu_locale_core` identifier.
+    #[must_use]
+    pub fn to_icu(&self) -> icu_locale_core::LanguageIdentifier {
+        use icu_locale_core::subtags::Variants;
+
+        let mut variants = self.variants().map(Variant::to_icu);
+        let variants = match (variants.next(), variants.next()) {
+            (None, _) => Variants::new(),
+            (Some(first), None) => Variants::from_variant(first),
+            (Some(first), Some(second)) => {
+                // Ours are already sorted and unique, as the constructor requires.
+                let mut all = vec![first, second];
+                all.extend(variants);
+                Variants::from_vec_unchecked(all)
+            }
+        };
+        icu_locale_core::LanguageIdentifier {
+            language: self.language.to_icu(),
+            script: self.script.map(Script::to_icu),
+            region: self.region.map(Region::to_icu),
+            variants,
+        }
+    }
+
+    /// Converts from the `icu_locale_core` identifier.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the identifier has more than [`MAX_VARIANTS`] variants.
+    pub fn try_from_icu(
+        identifier: &icu_locale_core::LanguageIdentifier,
+    ) -> Result<Self, LocaleParseError> {
+        let mut converted = Self::new(Language::from_icu(identifier.language))
+            .with_script(identifier.script.map(Script::from_icu))
+            .with_region(identifier.region.map(Region::from_icu));
+        for variant in identifier.variants.iter() {
+            converted = converted.with_variant(Variant::from_icu(*variant))?;
+        }
+        Ok(converted)
+    }
 }
 
 /// The next subtag position the parser may fill.
@@ -385,5 +426,52 @@ mod tests {
     fn unknown_identifier_is_the_unknown_language() {
         assert_eq!(LanguageIdentifier::UNKNOWN, parse("und"));
         assert!(LanguageIdentifier::UNKNOWN.language().is_unknown());
+    }
+
+    /// ICU parses the same texts to the same canonical identifiers, and the
+    /// conversions in both directions preserve them.
+    #[test]
+    fn converts_to_and_from_icu() {
+        for text in [
+            "en",
+            "EN-us",
+            "zh-hant-tw",
+            "es-419",
+            "de-CH-1901",
+            "sl-rozaj-biske-1994",
+            "und",
+        ] {
+            let ours = parse(text);
+            let icu = icu_locale_core::LanguageIdentifier::try_from_str(text).unwrap();
+
+            assert_eq!(ours.to_icu(), icu, "{text}");
+            assert_eq!(ours.to_icu().to_string(), ours.to_string(), "{text}");
+            assert_eq!(LanguageIdentifier::try_from_icu(&icu), Ok(ours), "{text}");
+        }
+    }
+
+    #[test]
+    fn subtags_convert_to_and_from_icu() {
+        assert_eq!(language!("de").to_icu().as_str(), "de");
+        assert_eq!(script!("Hant").to_icu().as_str(), "Hant");
+        assert_eq!(region!("419").to_icu().as_str(), "419");
+        assert_eq!(variant!("1996").to_icu().as_str(), "1996");
+        assert_eq!(
+            Language::from_icu(icu_locale_core::subtags::Language::UNKNOWN),
+            Language::UNKNOWN
+        );
+    }
+
+    #[test]
+    fn icu_identifiers_with_too_many_variants_are_rejected() {
+        let icu = icu_locale_core::LanguageIdentifier::try_from_str(
+            "en-aaaaa-bbbbb-ccccc-ddddd-eeeee",
+        )
+        .unwrap();
+
+        assert_eq!(
+            LanguageIdentifier::try_from_icu(&icu),
+            Err(LocaleParseError::TooManyVariants)
+        );
     }
 }

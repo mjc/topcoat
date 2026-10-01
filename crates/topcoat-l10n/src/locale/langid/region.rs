@@ -37,6 +37,22 @@ impl Region {
     pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    /// Converts to the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn to_icu(self) -> icu_locale_core::subtags::Region {
+        // Both types accept the same canonical text.
+        match icu_locale_core::subtags::Region::try_from_raw(self.0.into_raw()) {
+            Ok(region) => region,
+            Err(_) => unreachable!(),
+        }
+    }
+
+    /// Converts from the `icu_locale_core` subtag.
+    #[must_use]
+    pub const fn from_icu(region: icu_locale_core::subtags::Region) -> Self {
+        Self(Buffer::from_raw(region.into_raw()))
+    }
 }
 
 impl AsRef<str> for Region {
