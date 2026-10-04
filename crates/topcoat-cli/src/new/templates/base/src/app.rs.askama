@@ -1,6 +1,7 @@
-{% if counter -%}
-mod counter;
+mod todos;
 
+{% if toasty -%}
+use toasty::Db;
 {% endif -%}
 use topcoat::{
     Result,
@@ -23,11 +24,15 @@ use topcoat::{
 {%- endif %}
 {%- match routing %}
 {%- when Routing::Module %}
-    router::{Router, Slot, layout, module_router, page},
+{%- if interaction == Interaction::Topcoat %}
+    router::{Router, RouterBuilderDiscoverExt, Slot, href, layout, module_router, page},
+{%- else %}
+    router::{Router, Slot, href, layout, module_router, page},
+{%- endif %}
 {%- when Routing::Discover %}
-    router::{Router, RouterBuilderDiscoverExt, Slot, layout, page},
+    router::{Router, RouterBuilderDiscoverExt, Slot, href, layout, page},
 {%- when Routing::Manual %}
-    router::{Router, Slot, layout, page},
+    router::{Router, Slot, href, layout, page},
 {%- endmatch %}
 {%- if interaction == Interaction::Topcoat %}
     runtime::RouterBuilderRuntimeExt,
@@ -44,12 +49,20 @@ const {{ font.ident }}: Font = fontsource_font!({{ font.ident }}{{ font.args }})
 {%- endif %}
 
 /// Builds the application's router.
+{%- if toasty %}
+pub fn router(db: Db) -> Router {
+{%- else %}
 pub fn router() -> Router {
+{%- endif %}
 {%- match routing %}
 {%- when Routing::Module %}
     // The pages and layouts of this module and its submodules, with paths derived
     // from the module tree.
     module_router!()
+{%- if interaction == Interaction::Topcoat %}
+        // The runtime's procedures and shards, which have no place in the module tree.
+        .discover()
+{%- endif %}
 {%- when Routing::Discover %}
     // Every page and layout in the application, at the paths in their attributes.
     Router::builder()
@@ -58,17 +71,27 @@ pub fn router() -> Router {
     Router::builder()
         .layout(root)
         .page(home)
-{%- if counter %}
-        .page(counter::page)
-{%- if interaction != Interaction::Topcoat %}
-        .route(counter::increment)
-{%- endif %}
+        .page(todos::page)
+{%- if interaction == Interaction::Topcoat %}
+        .route(todos::todo_list)
+        .route(todos::add)
+        .route(todos::toggle)
+        .route(todos::remove)
+{%- else %}
+        .route(todos::create)
+        .route(todos::id::toggle)
+        .route(todos::id::delete)
 {%- endif %}
 {%- endmatch %}
 {%- if let Some(font) = font %}
 {%- if routing != Routing::Discover %}
         .font({{ font.ident }})
 {%- endif %}
+{%- endif %}
+{%- if toasty %}
+        .app_context(db)
+{%- else %}
+        .app_context(crate::features::todo::Todos::default())
 {%- endif %}
         .assets(AssetBundle::load().unwrap())
 {%- if interaction == Interaction::Topcoat %}
@@ -152,11 +175,9 @@ async fn home() -> Result<impl View> {
                 <code>"src/app.rs"</code>
                 " and save to see your changes."
             </p>
-{%- if counter %}
             <p{{ classes.paragraph }}>
-                <a{{ classes.link }} href=(topcoat::router::href!(counter::page))>"Counter example"</a>
+                <a{{ classes.link }} href=(href!(todos::page))>"Todo example"</a>
             </p>
-{%- endif %}
         </main>
     })
 }

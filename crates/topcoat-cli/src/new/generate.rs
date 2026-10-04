@@ -5,7 +5,7 @@ use topcoat_core_grammar::pretty::pretty_print_str;
 use topcoat_font::fontsource::{Family, Style};
 
 use super::{
-    choice::{Interaction, Routing},
+    choice::{DatabaseBackend, Interaction, Routing},
     manifest::{Dependency, Manifest},
     name::PackageName,
     options::{DatabaseSetup, FontSetup, IconSetup, ProjectOptions},
@@ -20,20 +20,32 @@ const TOPCOAT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const TOKIO_VERSION: &str = "1.51.1";
 /// The `serde` version generated applications depend on.
 const SERDE_VERSION: &str = "1";
+/// The `toasty` and `toasty-cli` version generated applications depend on.
+const TOASTY_VERSION: &str = "0.11";
 /// The Iconify set the home page renders an example icon from.
 const EXAMPLE_ICON_SET: &str = "lucide";
 
 /// `src/main.rs`: the module declarations and entry point.
 #[derive(Template)]
-#[template(path = "main.rs.askama", escape = "none")]
+#[template(path = "base/src/main.rs.askama", escape = "none")]
 struct MainRs {
+    /// Whether the application stores its data with Toasty.
+    toasty: bool,
     /// Whether the application has a module of hand-written icons.
     custom_icons: bool,
 }
 
+/// `.gitignore`.
+#[derive(Template)]
+#[template(path = "base/.gitignore.askama", escape = "none")]
+struct Gitignore {
+    /// Whether the application stores its data with Toasty.
+    toasty: bool,
+}
+
 /// `src/app.rs`: the router, root layout, and home page.
 #[derive(Template)]
-#[template(path = "app.rs.askama", escape = "none")]
+#[template(path = "base/src/app.rs.askama", escape = "none")]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "each bool switches a template section"
@@ -45,8 +57,8 @@ struct AppRs<'a> {
     paths: Paths,
     classes: Classes,
     interaction: Interaction,
-    /// Whether the application has the counter example in `app::counter`.
-    counter: bool,
+    /// Whether the application stores its data with Toasty.
+    toasty: bool,
     tailwind: bool,
     /// Whether the home page shows an icon from the default Iconify set.
     iconify_example: bool,
@@ -124,6 +136,29 @@ impl Paths {
             Routing::Discover | Routing::Manual => format!("({method} {path:?})"),
         }
     }
+
+    /// The arguments of a `#[route]` attribute for a `method` handler below its module:
+    /// at `relative` to the module path with module routing, otherwise at `path`.
+    fn route_at(self, method: &str, relative: &str, path: &str) -> String {
+        match self.0 {
+            Routing::Module => format!("({method} {relative:?})"),
+            Routing::Discover | Routing::Manual => format!("({method} {path:?})"),
+        }
+    }
+
+    /// The macro declaring a path parameter: `module_param` with module routing, where
+    /// the parameter is also the module's segment, otherwise `path_param`.
+    fn param(self) -> &'static str {
+        if self.is_module() {
+            "module_param"
+        } else {
+            "path_param"
+        }
+    }
+
+    fn is_module(self) -> bool {
+        self.0 == Routing::Module
+    }
 }
 
 /// `class` attributes for the starter's elements, each with a leading space: Tailwind
@@ -135,6 +170,9 @@ struct Classes {
     paragraph: &'static str,
     link: &'static str,
     button: &'static str,
+    input: &'static str,
+    list: &'static str,
+    item: &'static str,
 }
 
 impl Classes {
@@ -146,6 +184,9 @@ impl Classes {
                 paragraph: r#" class="mt-4""#,
                 link: r#" class="text-blue-600 underline""#,
                 button: r#" class="rounded border px-3 py-1""#,
+                input: r#" class="rounded border px-2 py-1""#,
+                list: r#" class="mt-4 space-y-2""#,
+                item: r#" class="flex items-center gap-2""#,
             }
         } else {
             Self {
@@ -154,46 +195,85 @@ impl Classes {
                 paragraph: "",
                 link: "",
                 button: "",
+                input: "",
+                list: "",
+                item: "",
             }
         }
     }
 }
 
-/// `src/app/counter.rs` with Topcoat's browser runtime.
+/// `src/app/todos.rs` with plain HTML forms.
 #[derive(Template)]
-#[template(path = "counter/topcoat.rs.askama", escape = "none")]
-struct TopcoatCounter {
+#[template(path = "interaction/forms/src/app/todos.rs.askama", escape = "none")]
+struct FormsTodos {
     paths: Paths,
     classes: Classes,
 }
 
-/// `src/app/counter.rs` with htmx.
+/// `src/app/todos/id.rs` with plain HTML forms, also used with Alpine AJAX.
 #[derive(Template)]
-#[template(path = "counter/htmx.rs.askama", escape = "none")]
-struct HtmxCounter {
+#[template(path = "interaction/forms/src/app/todos/id.rs.askama", escape = "none")]
+struct FormsTodoId {
+    paths: Paths,
+}
+
+/// `src/app/todos.rs` with Topcoat's browser runtime. Procedures replace the routes of
+/// `src/app/todos/id.rs`.
+#[derive(Template)]
+#[template(path = "interaction/topcoat/src/app/todos.rs.askama", escape = "none")]
+struct TopcoatTodos {
     paths: Paths,
     classes: Classes,
 }
 
-/// `src/app/counter.rs` with Datastar.
+/// `src/app/todos.rs` with Alpine AJAX.
 #[derive(Template)]
-#[template(path = "counter/datastar.rs.askama", escape = "none")]
-struct DatastarCounter {
+#[template(
+    path = "interaction/alpine-ajax/src/app/todos.rs.askama",
+    escape = "none"
+)]
+struct AlpineAjaxTodos {
     paths: Paths,
     classes: Classes,
 }
 
-/// `src/app/counter.rs` with Alpine AJAX.
+/// `src/app/todos.rs` with htmx.
 #[derive(Template)]
-#[template(path = "counter/alpine_ajax.rs.askama", escape = "none")]
-struct AlpineAjaxCounter {
+#[template(path = "interaction/htmx/src/app/todos.rs.askama", escape = "none")]
+struct HtmxTodos {
     paths: Paths,
     classes: Classes,
+}
+
+/// `src/app/todos/id.rs` with htmx.
+#[derive(Template)]
+#[template(path = "interaction/htmx/src/app/todos/id.rs.askama", escape = "none")]
+struct HtmxTodoId {
+    paths: Paths,
+}
+
+/// `src/app/todos.rs` with Datastar.
+#[derive(Template)]
+#[template(path = "interaction/datastar/src/app/todos.rs.askama", escape = "none")]
+struct DatastarTodos {
+    paths: Paths,
+    classes: Classes,
+}
+
+/// `src/app/todos/id.rs` with Datastar.
+#[derive(Template)]
+#[template(
+    path = "interaction/datastar/src/app/todos/id.rs.askama",
+    escape = "none"
+)]
+struct DatastarTodoId {
+    paths: Paths,
 }
 
 /// `build.rs`: build steps of the selected integrations.
 #[derive(Template)]
-#[template(path = "build.rs.askama", escape = "none")]
+#[template(path = "base/build.rs.askama", escape = "none")]
 struct BuildRs<'a> {
     tailwind: bool,
     icon_sets: Vec<&'a str>,
@@ -207,9 +287,11 @@ impl BuildRs<'_> {
 }
 
 #[derive(Template)]
-#[template(path = "README.md.askama", escape = "none")]
+#[template(path = "base/README.md.askama", escape = "none")]
 struct Readme<'a> {
     name: &'a str,
+    /// Whether the application stores its data with Toasty.
+    toasty: bool,
 }
 
 /// Renders the files of a new application named `name` with the given options.
@@ -252,12 +334,29 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
         Interaction::Htmx => manifest.dependency("topcoat", topcoat().features(["htmx"]))?,
         Interaction::Datastar => {
             manifest.dependency("topcoat", topcoat().features(["datastar"]))?;
-            manifest.dependency("serde", Dependency::new(SERDE_VERSION).features(["derive"]))?;
         }
         Interaction::AlpineAjax => {
             manifest.dependency("topcoat", topcoat().features(["alpine-ajax"]))?;
         }
     }
+    // Every todo page except the runtime's reads form or signal data with serde.
+    if options.interaction != Interaction::Topcoat {
+        manifest.dependency("serde", Dependency::new(SERDE_VERSION).features(["derive"]))?;
+    }
+
+    let toasty = match options.database {
+        DatabaseSetup::None => false,
+        DatabaseSetup::Toasty {
+            backend: DatabaseBackend::Sqlite,
+        } => {
+            manifest.dependency(
+                "toasty",
+                Dependency::new(TOASTY_VERSION).features(["sqlite"]),
+            )?;
+            manifest.dependency("toasty-cli", Dependency::new(TOASTY_VERSION))?;
+            true
+        }
+    };
 
     let font = match &options.font {
         FontSetup::None => None,
@@ -279,7 +378,10 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     let iconify_example = iconify_set == Some(EXAMPLE_ICON_SET);
     let custom_icons = options.icons == IconSetup::Custom;
     if custom_icons {
-        plan.add("src/icons.rs", include_str!("templates/icons.rs"))?;
+        plan.add(
+            "src/icons.rs",
+            include_str!("templates/icons/custom/src/icons.rs"),
+        )?;
     }
 
     // A package name has no characters that need escaping, so its debug form is a
@@ -288,17 +390,52 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     let paths = Paths(options.routing);
     let classes = Classes::new(options.tailwind);
 
-    let counter = match options.interaction {
-        Interaction::None => None,
-        Interaction::Topcoat => Some(render(&TopcoatCounter { paths, classes })?),
-        Interaction::Htmx => Some(render(&HtmxCounter { paths, classes })?),
-        Interaction::Datastar => Some(render(&DatastarCounter { paths, classes })?),
-        Interaction::AlpineAjax => Some(render(&AlpineAjaxCounter { paths, classes })?),
-    };
-    if let Some(counter) = &counter {
+    // The todo feature, stored with the selected database integration or in memory.
+    plan.add(
+        "src/features.rs",
+        include_str!("templates/base/src/features.rs"),
+    )?;
+    if toasty {
         plan.add(
-            "src/app/counter.rs",
-            format_rust("src/app/counter.rs", counter)?,
+            "src/db.rs",
+            include_str!("templates/storage/toasty/src/db.rs"),
+        )?;
+        plan.add(
+            "src/features/todo.rs",
+            include_str!("templates/storage/toasty/src/features/todo.rs"),
+        )?;
+    } else {
+        plan.add(
+            "src/features/todo.rs",
+            include_str!("templates/storage/memory/src/features/todo.rs"),
+        )?;
+    }
+
+    // The todo pages, built with the selected interaction approach.
+    let (todos, todo_id) = match options.interaction {
+        Interaction::None => (
+            render(&FormsTodos { paths, classes })?,
+            Some(render(&FormsTodoId { paths })?),
+        ),
+        Interaction::AlpineAjax => (
+            render(&AlpineAjaxTodos { paths, classes })?,
+            Some(render(&FormsTodoId { paths })?),
+        ),
+        Interaction::Htmx => (
+            render(&HtmxTodos { paths, classes })?,
+            Some(render(&HtmxTodoId { paths })?),
+        ),
+        Interaction::Datastar => (
+            render(&DatastarTodos { paths, classes })?,
+            Some(render(&DatastarTodoId { paths })?),
+        ),
+        Interaction::Topcoat => (render(&TopcoatTodos { paths, classes })?, None),
+    };
+    plan.add("src/app/todos.rs", format_rust("src/app/todos.rs", &todos)?)?;
+    if let Some(todo_id) = todo_id {
+        plan.add(
+            "src/app/todos/id.rs",
+            format_rust("src/app/todos/id.rs", &todo_id)?,
         )?;
     }
 
@@ -308,7 +445,7 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
         paths,
         classes,
         interaction: options.interaction,
-        counter: counter.is_some(),
+        toasty,
         tailwind: options.tailwind,
         iconify_example,
         icon_set_hint: iconify_set.filter(|_| !iconify_example),
@@ -316,7 +453,10 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
         font,
     })?;
     plan.add("src/app.rs", format_rust("src/app.rs", &app)?)?;
-    let main = render(&MainRs { custom_icons })?;
+    let main = render(&MainRs {
+        toasty,
+        custom_icons,
+    })?;
     plan.add("src/main.rs", format_rust("src/main.rs", &main)?)?;
 
     let build = BuildRs {
@@ -329,18 +469,19 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
 
     // With Tailwind, the stylesheet is the Tailwind input.
     let styles = if options.tailwind {
-        include_str!("templates/tailwind.css")
+        include_str!("templates/tailwind/styles.css")
     } else {
-        include_str!("templates/styles.css")
+        include_str!("templates/base/styles.css")
     };
     plan.add("styles.css", styles)?;
 
     plan.add("Cargo.toml", manifest.render())?;
-    plan.add(".gitignore", include_str!("templates/gitignore"))?;
+    plan.add(".gitignore", render(&Gitignore { toasty })?)?;
     plan.add(
         "README.md",
         render(&Readme {
             name: name.as_str(),
+            toasty,
         })?,
     )?;
     Ok(plan)
@@ -348,13 +489,10 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
 
 /// Rejects options selecting integrations the generator does not support yet.
 fn check_supported(options: &ProjectOptions) -> Result<(), String> {
-    let unsupported: Vec<&str> = [
-        (options.database != DatabaseSetup::None, "--database toasty"),
-        (options.ui, "--ui"),
-    ]
-    .into_iter()
-    .filter_map(|(selected, flag)| selected.then_some(flag))
-    .collect();
+    let unsupported: Vec<&str> = [(options.ui, "--ui")]
+        .into_iter()
+        .filter_map(|(selected, flag)| selected.then_some(flag))
+        .collect();
     if unsupported.is_empty() {
         Ok(())
     } else {
@@ -500,13 +638,14 @@ mod tests {
     }
 
     #[test]
-    fn each_interaction_adds_its_feature_and_counter() {
+    fn each_interaction_builds_the_todo_pages_its_own_way() {
         let name = PackageName::new("my-app").unwrap();
         for (interaction, feature) in [
-            (Interaction::Topcoat, "runtime"),
-            (Interaction::Htmx, "htmx"),
-            (Interaction::Datastar, "datastar"),
-            (Interaction::AlpineAjax, "alpine-ajax"),
+            (Interaction::None, None),
+            (Interaction::Topcoat, Some("runtime")),
+            (Interaction::Htmx, Some("htmx")),
+            (Interaction::Datastar, Some("datastar")),
+            (Interaction::AlpineAjax, Some("alpine-ajax")),
         ] {
             let options = ProjectOptions {
                 routing: Routing::Manual,
@@ -514,33 +653,72 @@ mod tests {
                 ..minimal()
             };
             let plan = generate(&name, &options).unwrap();
+            let label = format!("{interaction:?}");
 
             let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
             let dependencies = &manifest["dependencies"];
-            assert!(
-                features(&dependencies["topcoat"]).contains(&feature),
-                "{feature}"
-            );
-            assert_eq!(
-                dependencies.get("serde").is_some(),
-                interaction == Interaction::Datastar,
-                "{feature}"
-            );
+            if let Some(feature) = feature {
+                assert!(
+                    features(&dependencies["topcoat"]).contains(&feature),
+                    "{label}"
+                );
+            }
+            // The runtime calls procedures with plain arguments; every other approach
+            // deserializes form or signal data.
+            let runtime = interaction == Interaction::Topcoat;
+            assert_eq!(dependencies.get("serde").is_none(), runtime, "{label}");
 
-            assert!(file(&plan, "src/app/counter.rs").is_some(), "{feature}");
-            let app = file(&plan, "src/app.rs").unwrap();
-            assert!(app.contains("mod counter;"), "{feature}");
-            assert!(app.contains(".page(counter::page)"), "{feature}");
-            // Only server-side counters have a route to register.
+            assert!(file(&plan, "src/app/todos.rs").is_some(), "{label}");
             assert_eq!(
-                app.contains(".route(counter::increment)"),
-                interaction != Interaction::Topcoat,
-                "{feature}"
+                file(&plan, "src/app/todos/id.rs").is_none(),
+                runtime,
+                "{label}"
             );
+            let app = file(&plan, "src/app.rs").unwrap();
+            assert!(app.contains(".page(todos::page)"), "{label}");
+            if runtime {
+                assert!(app.contains(".route(todos::todo_list)"), "{label}");
+                assert!(app.contains(".route(todos::add)"), "{label}");
+            } else {
+                assert!(app.contains(".route(todos::create)"), "{label}");
+                assert!(app.contains(".route(todos::id::toggle)"), "{label}");
+            }
         }
+    }
+
+    #[test]
+    fn todos_are_stored_with_toasty_or_in_memory() {
+        let name = PackageName::new("my-app").unwrap();
 
         let plan = generate(&name, &minimal()).unwrap();
-        assert!(file(&plan, "src/app/counter.rs").is_none());
+        let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
+        assert!(manifest["dependencies"].get("toasty").is_none());
+        assert!(file(&plan, "src/db.rs").is_none());
+        assert!(
+            !file(&plan, "src/features/todo.rs")
+                .unwrap()
+                .contains("toasty")
+        );
+
+        let options = ProjectOptions {
+            database: DatabaseSetup::Toasty {
+                backend: DatabaseBackend::Sqlite,
+            },
+            ..minimal()
+        };
+        let plan = generate(&name, &options).unwrap();
+        let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
+        let toasty = &manifest["dependencies"]["toasty"];
+        assert!(features(toasty).contains(&"sqlite"));
+        assert!(manifest["dependencies"].get("toasty-cli").is_some());
+        assert!(file(&plan, "src/db.rs").is_some());
+        assert!(
+            file(&plan, "src/features/todo.rs")
+                .unwrap()
+                .contains("toasty::Model")
+        );
+        assert!(file(&plan, "src/main.rs").unwrap().contains("ToastyCli"));
+        assert!(file(&plan, ".gitignore").unwrap().contains("data.db"));
     }
 
     #[test]
@@ -617,9 +795,11 @@ mod tests {
     fn rejects_integrations_that_cannot_be_generated_yet() {
         let name = PackageName::new("my-app").unwrap();
         let options = ProjectOptions {
-            database: DatabaseSetup::Toasty {
-                backend: DatabaseBackend::Sqlite,
+            tailwind: true,
+            icons: IconSetup::Iconify {
+                set: EXAMPLE_ICON_SET.to_string(),
             },
+            ui: true,
             ..minimal()
         };
         assert!(generate(&name, &options).is_err());

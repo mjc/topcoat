@@ -1,9 +1,0 @@
-mod app;
-{%- if custom_icons %}
-mod icons;
-{%- endif %}
-
-#[tokio::main]
-async fn main() {
-    topcoat::start(app::router()).await.unwrap();
-}

@@ -15,6 +15,7 @@ use console::style;
 use self::{
     input::{ChoiceArgs, Input},
     name::PackageName,
+    options::DatabaseSetup,
 };
 
 #[derive(Args)]
@@ -80,9 +81,18 @@ impl NewCommand {
         println!("  {}", style(command.join(" ")).dim());
 
         println!();
-        println!("Start the development server:");
-        println!("  {}", style(format!("cd {path}")).bold());
-        println!("  {}", style("topcoat dev").bold());
+        let mut steps = vec![format!("cd {path}")];
+        if let DatabaseSetup::Toasty { .. } = resolution.options.database {
+            println!("Create the database tables, then start the development server:");
+            steps.push("cargo run -- toasty migration generate".to_string());
+            steps.push("cargo run -- toasty migration apply".to_string());
+        } else {
+            println!("Start the development server:");
+        }
+        steps.push("topcoat dev".to_string());
+        for step in steps {
+            println!("  {}", style(step).bold());
+        }
         Ok(())
     }
 }
