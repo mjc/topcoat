@@ -6,8 +6,7 @@ use super::js::Js;
 use crate::expr::{Expr, name_resolver::NameResolver};
 
 impl Expr {
-    /// Lowers the contents of a `{ ... }` block. The trailing expression (a
-    /// statement without a semicolon) becomes the block's value.
+    /// Lowers a block, optionally returning its trailing expression as a value.
     pub(super) fn block(
         block: &Block,
         rust: &mut TokenStream,

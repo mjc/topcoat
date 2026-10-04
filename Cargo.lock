@@ -3488,9 +3488,11 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "syn 3.0.6",
  "tokio",
  "toml",
  "topcoat",
+ "topcoat-runtime-grammar",
  "v8",
 ]
 

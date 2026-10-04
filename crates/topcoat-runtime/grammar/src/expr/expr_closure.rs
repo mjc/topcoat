@@ -39,6 +39,11 @@ impl Expr {
             // A block body maps directly onto the arrow function body without
             // the IIFE wrapper that a block expression would need.
             SynExpr::Block(block) => Self::block(&block.block, &mut body, js, names, true)?,
+            other if Self::is_statement_only(other) => {
+                js.push_str("{ ");
+                Self::stmt_expr(other, &mut body, js, names)?;
+                js.push_str("; }");
+            }
             other => Self::dispatch(other, &mut body, js, names)?,
         }
         names.pop_scope();

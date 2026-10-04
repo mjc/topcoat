@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
-use syn::Stmt;
+use syn::{Expr as SynExpr, Stmt};
 
 use super::js::Js;
 use crate::expr::{
@@ -14,7 +14,7 @@ impl Expr {
         rust: &mut TokenStream,
         js: &mut Js,
         names: &mut NameResolver,
-        is_last: bool,
+        is_tail: bool,
     ) -> syn::Result<()> {
         match stmt {
             Stmt::Local(local) => {
@@ -42,16 +42,7 @@ impl Expr {
             Stmt::Expr(expr, semi) => {
                 // A trailing expression (no semicolon) is the block's value, so
                 // it becomes the JavaScript `return`.
-                let returns = is_last
-                    && semi.is_none()
-                    && !matches!(
-                        expr,
-                        syn::Expr::Break(_)
-                            | syn::Expr::Continue(_)
-                            | syn::Expr::Return(_)
-                            | syn::Expr::Loop(_)
-                            | syn::Expr::While(_)
-                    );
+                let returns = is_tail && semi.is_none() && !Self::is_statement_only(expr);
                 if returns {
                     js.push_str("return ");
                 }
@@ -60,7 +51,7 @@ impl Expr {
                 if returns {
                     Self::dispatch(expr, &mut value, js, names)?;
                 } else {
-                    Self::statement_expr(expr, &mut value, js, names)?;
+                    Self::stmt_expr(expr, &mut value, js, names)?;
                 }
 
                 if returns {
@@ -81,20 +72,37 @@ impl Expr {
 
     /// Emits statement blocks and conditionals in the enclosing function so
     /// their jumps still target the surrounding loop or closure.
-    fn statement_expr(
-        expr: &syn::Expr,
+    pub(super) fn stmt_expr(
+        expr: &SynExpr,
         rust: &mut TokenStream,
         js: &mut Js,
         names: &mut NameResolver,
     ) -> syn::Result<()> {
         match expr {
-            syn::Expr::If(inner) => {
+            SynExpr::If(inner) => {
                 Self::expr_if_inner(inner, js, names, false)?.to_tokens(rust);
-                Ok(())
             }
-            syn::Expr::Block(inner) => Self::block(&inner.block, rust, js, names, false),
-            syn::Expr::Paren(inner) => Self::statement_expr(&inner.expr, rust, js, names),
-            other => Self::dispatch(other, rust, js, names),
+            SynExpr::Block(inner) => Self::block(&inner.block, rust, js, names, false)?,
+            SynExpr::Paren(inner) => {
+                let mut nested = TokenStream::new();
+                Self::stmt_expr(&inner.expr, &mut nested, js, names)?;
+                quote! { (#nested) }.to_tokens(rust);
+            }
+            other => Self::dispatch(other, rust, js, names)?,
+        }
+        Ok(())
+    }
+
+    /// Whether the lowered JavaScript requires statement position.
+    pub(super) fn is_statement_only(expr: &SynExpr) -> bool {
+        match expr {
+            SynExpr::Paren(inner) => Self::is_statement_only(&inner.expr),
+            SynExpr::Break(_)
+            | SynExpr::Continue(_)
+            | SynExpr::Return(_)
+            | SynExpr::Loop(_)
+            | SynExpr::While(_) => true,
+            _ => false,
         }
     }
 }
