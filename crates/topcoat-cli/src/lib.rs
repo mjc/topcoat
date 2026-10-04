@@ -4,6 +4,7 @@ mod asset;
 mod common;
 mod dev;
 mod fmt;
+mod new;
 mod ui;
 
 use clap::{Parser, Subcommand};
@@ -18,6 +19,7 @@ pub struct TopcoatCli {
 impl TopcoatCli {
     pub async fn run(self) {
         match self.command {
+            Command::New(cmd) => cmd.run(),
             Command::Ui(cmd) => cmd.run(),
             Command::Fmt(cmd) => cmd.run().await,
             Command::Dev(cmd) => cmd.run().await,
@@ -28,6 +30,8 @@ impl TopcoatCli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create a new Topcoat application
+    New(new::NewCommand),
     /// Start a development server
     Dev(dev::DevCommand),
     /// Format Topcoat macro bodies
