@@ -1,3 +1,7 @@
+{% if counter -%}
+mod counter;
+
+{% endif -%}
 use topcoat::{
     Result,
 {%- if tailwind %}
@@ -25,6 +29,9 @@ use topcoat::{
 {%- when Routing::Manual %}
     router::{Router, Slot, layout, page},
 {%- endmatch %}
+{%- if interaction == Interaction::Topcoat %}
+    runtime::RouterBuilderRuntimeExt,
+{%- endif %}
 {%- if tailwind %}
     tailwind,
 {%- endif %}
@@ -51,6 +58,12 @@ pub fn router() -> Router {
     Router::builder()
         .layout(root)
         .page(home)
+{%- if counter %}
+        .page(counter::page)
+{%- if interaction != Interaction::Topcoat %}
+        .route(counter::increment)
+{%- endif %}
+{%- endif %}
 {%- endmatch %}
 {%- if let Some(font) = font %}
 {%- if routing != Routing::Discover %}
@@ -58,10 +71,14 @@ pub fn router() -> Router {
 {%- endif %}
 {%- endif %}
         .assets(AssetBundle::load().unwrap())
+{%- if interaction == Interaction::Topcoat %}
+        // Lets the browser runtime rerun pages; register it after other layers.
+        .runtime()
+{%- endif %}
         .build()
 }
 
-#[layout{{ self.path("/") }}]
+#[layout{{ paths.page("/") }}]
 async fn root(slot: Slot<'_>) -> Result<impl View> {
     Ok(view! {
         <!DOCTYPE html>
@@ -78,6 +95,25 @@ async fn root(slot: Slot<'_>) -> Result<impl View> {
 {%- if let Some(font) = font %}
                 topcoat::font::link(font: {{ font.ident }})
 {%- endif %}
+{%- match interaction %}
+{%- when Interaction::Topcoat %}
+                topcoat::runtime::script()
+{%- when Interaction::Htmx %}
+                <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"></script>
+{%- when Interaction::Datastar %}
+                <script
+                    type="module"
+                    src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.2/bundles/datastar.js"
+                ></script>
+{%- when Interaction::AlpineAjax %}
+                // `defer` ensures that Alpine initializes after the page body has been parsed.
+                <script
+                    defer=""
+                    src="https://cdn.jsdelivr.net/npm/@imacrayon/alpine-ajax@0.12.4/dist/cdn.min.js"
+                ></script>
+                <script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.0/dist/cdn.min.js"></script>
+{%- when Interaction::None %}
+{%- endmatch %}
                 topcoat::dev::script()
             </head>
 {%- if let Some(font) = font %}
@@ -97,16 +133,11 @@ async fn root(slot: Slot<'_>) -> Result<impl View> {
 // https://icon-sets.iconify.design/{{ set }}/.
 {%- endif %}
 
-#[page{{ self.path("/") }}]
+#[page{{ paths.page("/") }}]
 async fn home() -> Result<impl View> {
     Ok(view! {
-{%- if tailwind %}
-        <main class="mx-auto max-w-2xl px-4 py-16">
-            <h1 class="text-3xl font-bold">
-{%- else %}
-        <main>
-            <h1>
-{%- endif %}
+        <main{{ classes.main }}>
+            <h1{{ classes.heading }}>
 {%- if iconify_example %}
                 icon(data: iconify_icon!("lucide:sparkles"))
                 " "
@@ -116,15 +147,16 @@ async fn home() -> Result<impl View> {
 {%- endif %}
                 {{ title }}
             </h1>
-{%- if tailwind %}
-            <p class="mt-4">
-{%- else %}
-            <p>
-{%- endif %}
+            <p{{ classes.paragraph }}>
                 "Edit "
                 <code>"src/app.rs"</code>
                 " and save to see your changes."
             </p>
+{%- if counter %}
+            <p{{ classes.paragraph }}>
+                <a{{ classes.link }} href=(topcoat::router::href!(counter::page))>"Counter example"</a>
+            </p>
+{%- endif %}
         </main>
     })
 }

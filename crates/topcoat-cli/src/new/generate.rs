@@ -18,6 +18,8 @@ use crate::common::format;
 const TOPCOAT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The `tokio` version generated applications depend on.
 const TOKIO_VERSION: &str = "1.51.1";
+/// The `serde` version generated applications depend on.
+const SERDE_VERSION: &str = "1";
 /// The Iconify set the home page renders an example icon from.
 const EXAMPLE_ICON_SET: &str = "lucide";
 
@@ -32,10 +34,19 @@ struct MainRs {
 /// `src/app.rs`: the router, root layout, and home page.
 #[derive(Template)]
 #[template(path = "app.rs.askama", escape = "none")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool switches a template section"
+)]
 struct AppRs<'a> {
     /// The page title as a Rust string literal.
     title: &'a str,
     routing: Routing,
+    paths: Paths,
+    classes: Classes,
+    interaction: Interaction,
+    /// Whether the application has the counter example in `app::counter`.
+    counter: bool,
     tailwind: bool,
     /// Whether the home page shows an icon from the default Iconify set.
     iconify_example: bool,
@@ -92,15 +103,92 @@ impl FontInfo {
     }
 }
 
-impl AppRs<'_> {
+/// Renders the arguments of handler attributes for the selected routing style.
+#[derive(Clone, Copy)]
+struct Paths(Routing);
+
+impl Paths {
     /// The arguments of a `#[page]` or `#[layout]` attribute for a handler at `path`:
     /// empty with module routing, where paths come from modules.
-    fn path(&self, path: &str) -> String {
-        match self.routing {
+    fn page(self, path: &str) -> String {
+        match self.0 {
             Routing::Module => String::new(),
             Routing::Discover | Routing::Manual => format!("({path:?})"),
         }
     }
+
+    /// The arguments of a `#[route]` attribute for a `method` handler at `path`.
+    fn route(self, method: &str, path: &str) -> String {
+        match self.0 {
+            Routing::Module => format!("({method})"),
+            Routing::Discover | Routing::Manual => format!("({method} {path:?})"),
+        }
+    }
+}
+
+/// `class` attributes for the starter's elements, each with a leading space: Tailwind
+/// utility classes, or nothing with the plain stylesheet.
+#[derive(Clone, Copy)]
+struct Classes {
+    main: &'static str,
+    heading: &'static str,
+    paragraph: &'static str,
+    link: &'static str,
+    button: &'static str,
+}
+
+impl Classes {
+    fn new(tailwind: bool) -> Self {
+        if tailwind {
+            Self {
+                main: r#" class="mx-auto max-w-2xl px-4 py-16""#,
+                heading: r#" class="text-3xl font-bold""#,
+                paragraph: r#" class="mt-4""#,
+                link: r#" class="text-blue-600 underline""#,
+                button: r#" class="rounded border px-3 py-1""#,
+            }
+        } else {
+            Self {
+                main: "",
+                heading: "",
+                paragraph: "",
+                link: "",
+                button: "",
+            }
+        }
+    }
+}
+
+/// `src/app/counter.rs` with Topcoat's browser runtime.
+#[derive(Template)]
+#[template(path = "counter/topcoat.rs.askama", escape = "none")]
+struct TopcoatCounter {
+    paths: Paths,
+    classes: Classes,
+}
+
+/// `src/app/counter.rs` with htmx.
+#[derive(Template)]
+#[template(path = "counter/htmx.rs.askama", escape = "none")]
+struct HtmxCounter {
+    paths: Paths,
+    classes: Classes,
+}
+
+/// `src/app/counter.rs` with Datastar.
+#[derive(Template)]
+#[template(path = "counter/datastar.rs.askama", escape = "none")]
+struct DatastarCounter {
+    paths: Paths,
+    classes: Classes,
+}
+
+/// `src/app/counter.rs` with Alpine AJAX.
+#[derive(Template)]
+#[template(path = "counter/alpine_ajax.rs.askama", escape = "none")]
+struct AlpineAjaxCounter {
+    paths: Paths,
+    classes: Classes,
 }
 
 /// `build.rs`: build steps of the selected integrations.
@@ -158,6 +246,19 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
         }
     }
 
+    match options.interaction {
+        Interaction::None => {}
+        Interaction::Topcoat => manifest.dependency("topcoat", topcoat().features(["runtime"]))?,
+        Interaction::Htmx => manifest.dependency("topcoat", topcoat().features(["htmx"]))?,
+        Interaction::Datastar => {
+            manifest.dependency("topcoat", topcoat().features(["datastar"]))?;
+            manifest.dependency("serde", Dependency::new(SERDE_VERSION).features(["derive"]))?;
+        }
+        Interaction::AlpineAjax => {
+            manifest.dependency("topcoat", topcoat().features(["alpine-ajax"]))?;
+        }
+    }
+
     let font = match &options.font {
         FontSetup::None => None,
         FontSetup::Fontsource { family } => {
@@ -184,9 +285,30 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     // A package name has no characters that need escaping, so its debug form is a
     // valid string literal.
     let title = format!("{:?}", name.as_str());
+    let paths = Paths(options.routing);
+    let classes = Classes::new(options.tailwind);
+
+    let counter = match options.interaction {
+        Interaction::None => None,
+        Interaction::Topcoat => Some(render(&TopcoatCounter { paths, classes })?),
+        Interaction::Htmx => Some(render(&HtmxCounter { paths, classes })?),
+        Interaction::Datastar => Some(render(&DatastarCounter { paths, classes })?),
+        Interaction::AlpineAjax => Some(render(&AlpineAjaxCounter { paths, classes })?),
+    };
+    if let Some(counter) = &counter {
+        plan.add(
+            "src/app/counter.rs",
+            format_rust("src/app/counter.rs", counter)?,
+        )?;
+    }
+
     let app = render(&AppRs {
         title: &title,
         routing: options.routing,
+        paths,
+        classes,
+        interaction: options.interaction,
+        counter: counter.is_some(),
         tailwind: options.tailwind,
         iconify_example,
         icon_set_hint: iconify_set.filter(|_| !iconify_example),
@@ -228,7 +350,6 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
 fn check_supported(options: &ProjectOptions) -> Result<(), String> {
     let unsupported: Vec<&str> = [
         (options.database != DatabaseSetup::None, "--database toasty"),
-        (options.interaction != Interaction::None, "--interaction"),
         (options.ui, "--ui"),
     ]
     .into_iter()
@@ -379,6 +500,81 @@ mod tests {
     }
 
     #[test]
+    fn each_interaction_adds_its_feature_and_counter() {
+        let name = PackageName::new("my-app").unwrap();
+        for (interaction, feature) in [
+            (Interaction::Topcoat, "runtime"),
+            (Interaction::Htmx, "htmx"),
+            (Interaction::Datastar, "datastar"),
+            (Interaction::AlpineAjax, "alpine-ajax"),
+        ] {
+            let options = ProjectOptions {
+                routing: Routing::Manual,
+                interaction,
+                ..minimal()
+            };
+            let plan = generate(&name, &options).unwrap();
+
+            let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
+            let dependencies = &manifest["dependencies"];
+            assert!(
+                features(&dependencies["topcoat"]).contains(&feature),
+                "{feature}"
+            );
+            assert_eq!(
+                dependencies.get("serde").is_some(),
+                interaction == Interaction::Datastar,
+                "{feature}"
+            );
+
+            assert!(file(&plan, "src/app/counter.rs").is_some(), "{feature}");
+            let app = file(&plan, "src/app.rs").unwrap();
+            assert!(app.contains("mod counter;"), "{feature}");
+            assert!(app.contains(".page(counter::page)"), "{feature}");
+            // Only server-side counters have a route to register.
+            assert_eq!(
+                app.contains(".route(counter::increment)"),
+                interaction != Interaction::Topcoat,
+                "{feature}"
+            );
+        }
+
+        let plan = generate(&name, &minimal()).unwrap();
+        assert!(file(&plan, "src/app/counter.rs").is_none());
+    }
+
+    #[test]
+    fn browser_scripts_match_the_examples() {
+        let name = PackageName::new("my-app").unwrap();
+        for (interaction, example) in [
+            (Interaction::Htmx, "htmx"),
+            (Interaction::Datastar, "datastar"),
+            (Interaction::AlpineAjax, "alpine-ajax"),
+        ] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples")
+                .join(example)
+                .join("src/main.rs");
+            let source = std::fs::read_to_string(path).unwrap();
+            let urls: Vec<&str> = source
+                .split('"')
+                .filter(|part| part.starts_with("https://cdn.jsdelivr.net/"))
+                .collect();
+            assert!(!urls.is_empty(), "{example}");
+
+            let options = ProjectOptions {
+                interaction,
+                ..minimal()
+            };
+            let plan = generate(&name, &options).unwrap();
+            let app = file(&plan, "src/app.rs").unwrap();
+            for url in urls {
+                assert!(app.contains(url), "{example}: {url}");
+            }
+        }
+    }
+
+    #[test]
     fn custom_icons_live_in_their_own_module() {
         let name = PackageName::new("my-app").unwrap();
         let options = ProjectOptions {
@@ -430,11 +626,15 @@ mod tests {
     }
 
     #[test]
-    fn tokio_version_matches_the_workspace() {
+    fn dependency_versions_match_the_workspace() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
         let workspace: toml::Table = std::fs::read_to_string(path).unwrap().parse().unwrap();
-        let tokio = &workspace["workspace"]["dependencies"]["tokio"];
-        let version = tokio.as_str().or_else(|| tokio["version"].as_str());
-        assert_eq!(version, Some(TOKIO_VERSION));
+        for (name, expected) in [("tokio", TOKIO_VERSION), ("serde", SERDE_VERSION)] {
+            let dependency = &workspace["workspace"]["dependencies"][name];
+            let version = dependency
+                .as_str()
+                .or_else(|| dependency["version"].as_str());
+            assert_eq!(version, Some(expected), "{name}");
+        }
     }
 }
