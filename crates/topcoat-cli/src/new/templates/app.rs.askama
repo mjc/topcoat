@@ -5,6 +5,13 @@ use topcoat::{
 {%- else %}
     asset::{AssetBundle, RouterBuilderAssetExt, asset},
 {%- endif %}
+{%- if font.is_some() %}
+{%- if routing == Routing::Discover %}
+    font::{Font, fontsource::fontsource_font},
+{%- else %}
+    font::{Font, RouterBuilderFontExt, fontsource::fontsource_font},
+{%- endif %}
+{%- endif %}
 {%- if iconify_example %}
     icon::{icon, iconify::iconify_icon},
 {%- else if custom_icons %}
@@ -23,6 +30,11 @@ use topcoat::{
 {%- endif %}
     view::{View, view},
 };
+{%- if let Some(font) = font %}
+
+/// The {{ font.name }} font family, loaded from Fontsource.
+const {{ font.ident }}: Font = fontsource_font!({{ font.ident }}{{ font.args }});
+{%- endif %}
 
 /// Builds the application's router.
 pub fn router() -> Router {
@@ -40,6 +52,11 @@ pub fn router() -> Router {
         .layout(root)
         .page(home)
 {%- endmatch %}
+{%- if let Some(font) = font %}
+{%- if routing != Routing::Discover %}
+        .font({{ font.ident }})
+{%- endif %}
+{%- endif %}
         .assets(AssetBundle::load().unwrap())
         .build()
 }
@@ -58,9 +75,18 @@ async fn root(slot: Slot<'_>) -> Result<impl View> {
 {%- else %}
                 <link rel="stylesheet" href=(asset!("styles.css"))>
 {%- endif %}
+{%- if let Some(font) = font %}
+                topcoat::font::link(font: {{ font.ident }})
+{%- endif %}
                 topcoat::dev::script()
             </head>
+{%- if let Some(font) = font %}
+            <body style=(format!("font-family: {:?}, {{ font.generic }}", {{ font.ident }}.family()))>
+                (slot)
+            </body>
+{%- else %}
             <body>(slot)</body>
+{%- endif %}
         </html>
     })
 }

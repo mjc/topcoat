@@ -3263,6 +3263,7 @@ dependencies = [
  "topcoat-asset",
  "topcoat-core",
  "topcoat-core-grammar",
+ "topcoat-font",
  "topcoat-font-grammar",
  "topcoat-mail-grammar",
  "topcoat-router",

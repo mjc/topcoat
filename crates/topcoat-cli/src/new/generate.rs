@@ -1,5 +1,8 @@
+use std::fmt::Write as _;
+
 use askama::Template;
 use topcoat_core_grammar::pretty::pretty_print_str;
+use topcoat_font::fontsource::{Family, Style};
 
 use super::{
     choice::{Interaction, Routing},
@@ -40,6 +43,53 @@ struct AppRs<'a> {
     icon_set_hint: Option<&'a str>,
     /// Whether the application has a module of hand-written icons.
     custom_icons: bool,
+    font: Option<FontInfo>,
+}
+
+/// The Fontsource family a generated application loads.
+struct FontInfo {
+    /// The name of the family's constant, e.g. `INTER`.
+    ident: &'static str,
+    /// The family's display name, e.g. `Inter`.
+    name: &'static str,
+    /// The arguments of `fontsource_font!` after the family, each preceded by `, `.
+    args: String,
+    /// The generic CSS family used until the font loads or if it fails to.
+    generic: &'static str,
+}
+
+impl FontInfo {
+    /// The weights the starter pages use: regular text and bold headings.
+    const WEIGHTS: [u16; 2] = [400, 700];
+
+    /// Describes `family`, limited to the starter's weights in the normal style where the
+    /// family offers them, since every included face is preloaded.
+    fn new(family: &Family) -> Self {
+        let weights: Vec<String> = Self::WEIGHTS
+            .iter()
+            .filter(|weight| family.has_weight(**weight))
+            .map(ToString::to_string)
+            .collect();
+        let mut args = String::new();
+        if !weights.is_empty() {
+            write!(args, ", weight: [{}]", weights.join(", "))
+                .expect("writing to a String cannot fail");
+        }
+        if family.has_style(Style::Normal) {
+            args.push_str(", style: Normal");
+        }
+
+        Self {
+            ident: family.ident,
+            name: family.name,
+            args,
+            generic: match family.category {
+                "serif" => "serif",
+                "monospace" => "monospace",
+                _ => "sans-serif",
+            },
+        }
+    }
 }
 
 impl AppRs<'_> {
@@ -108,6 +158,16 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
         }
     }
 
+    let font = match &options.font {
+        FontSetup::None => None,
+        FontSetup::Fontsource { family } => {
+            manifest.dependency("topcoat", topcoat().features(["font-fontsource"]))?;
+            let family = Family::by_id(family)
+                .ok_or_else(|| format!("unknown Fontsource family `{family}`"))?;
+            Some(FontInfo::new(family))
+        }
+    };
+
     let mut plan = ProjectPlan::default();
 
     // Only the default set has an icon name known to exist for the example.
@@ -131,6 +191,7 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
         iconify_example,
         icon_set_hint: iconify_set.filter(|_| !iconify_example),
         custom_icons,
+        font,
     })?;
     plan.add("src/app.rs", format_rust("src/app.rs", &app)?)?;
     let main = render(&MainRs { custom_icons })?;
@@ -168,7 +229,6 @@ fn check_supported(options: &ProjectOptions) -> Result<(), String> {
     let unsupported: Vec<&str> = [
         (options.database != DatabaseSetup::None, "--database toasty"),
         (options.interaction != Interaction::None, "--interaction"),
-        (options.font != FontSetup::None, "--font"),
         (options.ui, "--ui"),
     ]
     .into_iter()
@@ -293,6 +353,29 @@ mod tests {
         let build_script = file(&plan, "build.rs").unwrap();
         assert!(build_script.contains(".icon_set(\"tabler\")"));
         assert!(!build_script.contains("lucide"));
+    }
+
+    #[test]
+    fn fontsource_fonts_are_registered_unless_discovered() {
+        let name = PackageName::new("my-app").unwrap();
+        for routing in [Routing::Module, Routing::Discover, Routing::Manual] {
+            let options = ProjectOptions {
+                routing,
+                font: FontSetup::Fontsource {
+                    family: "roboto".to_string(),
+                },
+                ..minimal()
+            };
+            let plan = generate(&name, &options).unwrap();
+
+            let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
+            assert!(features(&manifest["dependencies"]["topcoat"]).contains(&"font-fontsource"));
+            let app = file(&plan, "src/app.rs").unwrap();
+            assert!(app.contains("fontsource_font!(ROBOTO, weight: [400, 700], style: Normal)"));
+            assert!(app.contains("font::link(font: ROBOTO)"));
+            let registered = app.contains(".font(ROBOTO)");
+            assert_eq!(registered, routing != Routing::Discover, "{routing:?}");
+        }
     }
 
     #[test]

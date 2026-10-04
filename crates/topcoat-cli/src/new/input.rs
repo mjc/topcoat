@@ -1,4 +1,5 @@
 use clap::Args;
+use topcoat_font::fontsource::Family;
 
 use super::{
     choice::{Database, DatabaseBackend, Font, Icons, Interaction, Routing},
@@ -297,7 +298,7 @@ impl Input {
 
         let icon_setup = match (icons.value, self.icon_set.as_deref()) {
             (Icons::Iconify, set) => IconSetup::Iconify {
-                set: catalog_id("icon set", set.unwrap_or(DEFAULT_ICON_SET))?,
+                set: icon_set_id(set.unwrap_or(DEFAULT_ICON_SET))?,
             },
             (Icons::Custom | Icons::None, Some(_)) => {
                 return Err("--icon-set requires --icons iconify".to_string());
@@ -313,8 +314,15 @@ impl Input {
                 } else {
                     DEFAULT_FONT_FAMILY
                 };
+                let family = family.unwrap_or(default);
+                if Family::by_id(family).is_none() {
+                    return Err(format!(
+                        "unknown Fontsource family `{family}`; pass a family ID listed at \
+                         https://fontsource.org, such as `{DEFAULT_FONT_FAMILY}`"
+                    ));
+                }
                 FontSetup::Fontsource {
-                    family: catalog_id("font family", family.unwrap_or(default))?,
+                    family: family.to_string(),
                 }
             }
             (Font::None, Some(_)) => {
@@ -415,9 +423,10 @@ fn conflict(message: &str, overrides: [(Origin, &str); 2]) -> String {
     }
 }
 
-/// Checks that `value` is a catalog ID such as `lucide` or `inter`: lowercase ASCII
-/// letters, digits, and hyphens.
-fn catalog_id(kind: &str, value: &str) -> Result<String, String> {
+/// Checks that `value` has the form of an Iconify set ID such as `lucide`: lowercase
+/// ASCII letters, digits, and hyphens. Whether the set exists is only known once it is
+/// downloaded.
+fn icon_set_id(value: &str) -> Result<String, String> {
     let valid = !value.is_empty()
         && value
             .bytes()
@@ -426,7 +435,7 @@ fn catalog_id(kind: &str, value: &str) -> Result<String, String> {
         Ok(value.to_string())
     } else {
         Err(format!(
-            "invalid {kind} `{value}`: use lowercase letters, digits, and hyphens"
+            "invalid icon set `{value}`: use lowercase letters, digits, and hyphens"
         ))
     }
 }
@@ -540,6 +549,12 @@ mod tests {
     fn settings_reject_ids_that_are_not_catalog_ids() {
         assert!(resolve(&["--recommended", "--icon-set", "../lucide"]).is_err());
         assert!(resolve(&["--recommended", "--font-family", "\"inter\""]).is_err());
+    }
+
+    #[test]
+    fn font_families_must_exist_in_the_fontsource_catalog() {
+        assert!(resolve(&["--recommended", "--font-family", "roboto"]).is_ok());
+        assert!(resolve(&["--recommended", "--font-family", "no-such-font"]).is_err());
     }
 
     #[test]
