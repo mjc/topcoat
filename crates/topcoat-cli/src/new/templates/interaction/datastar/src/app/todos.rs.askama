@@ -6,9 +6,12 @@ use topcoat::{
     context::Cx,
     datastar::{PatchElements, Signals},
     router::{href, page, route},
-    view::{View, ViewExt, component, view},
+    view::{View, ViewExt,{% if ui %} attributes,{% endif %} component, view},
 };
 
+{% if ui -%}
+use crate::components::button::{ButtonSize, ButtonVariant, button};
+{% endif -%}
 use crate::features::todo::Todo;
 
 #[page{{ paths.page("/todos") }}]
@@ -23,7 +26,11 @@ pub async fn page() -> Result<impl View> {
             >
                 <input{{ classes.input }} type="text" data-bind:title="" placeholder="What needs doing?" required="">
                 " "
+{%- if ui %}
+                button(attrs: attributes! { type="submit" }, "Add")
+{%- else %}
                 <button{{ classes.button }} type="submit">"Add"</button>
+{%- endif %}
             </form>
             todo_list()
         </main>
@@ -43,23 +50,45 @@ pub async fn todo_list(cx: &Cx) -> Result<impl View> {
                 <ul{{ classes.list }}>
                     for todo in todos {
                         <li{{ classes.item }}>
+{%- if ui %}
+                            button(
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                attrs: attributes! {
+                                    data-on:click=(("@patch('", href!(id::toggle, id::Id(todo.id)), "')"))
+                                },
+                                if todo.done { "Undo" } else { "Done" }
+                            )
+{%- else %}
                             <button
                                 {{- classes.button }}
                                 data-on:click=(("@patch('", href!(id::toggle, id::Id(todo.id)), "')"))
                             >
                                 if todo.done { "Undo" } else { "Done" }
                             </button>
+{%- endif %}
                             if todo.done {
                                 <s>(&todo.title)</s>
                             } else {
                                 <span>(&todo.title)</span>
                             }
+{%- if ui %}
+                            button(
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Sm,
+                                attrs: attributes! {
+                                    data-on:click=(("@delete('", href!(id::delete, id::Id(todo.id)), "')"))
+                                },
+                                "Delete"
+                            )
+{%- else %}
                             <button
                                 {{- classes.button }}
                                 data-on:click=(("@delete('", href!(id::delete, id::Id(todo.id)), "')"))
                             >
                                 "Delete"
                             </button>
+{%- endif %}
                         </li>
                     }
                 </ul>

@@ -3268,6 +3268,7 @@ dependencies = [
  "topcoat-mail-grammar",
  "topcoat-router",
  "topcoat-ui",
+ "topcoat-ui-registry",
  "topcoat-view-grammar",
 ]
 

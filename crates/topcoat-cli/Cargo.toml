@@ -28,6 +28,7 @@ topcoat-font-grammar = { workspace = true, features = ["fontsource", "pretty"] }
 topcoat-mail-grammar = { workspace = true, features = ["pretty"] }
 topcoat-router = { workspace = true, features = ["websocket"] }
 topcoat-ui.workspace = true
+topcoat-ui-registry = { workspace = true, features = ["embedded"] }
 topcoat-view-grammar = { workspace = true, features = ["pretty"] }
 
 askama.workspace = true

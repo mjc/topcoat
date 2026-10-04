@@ -3,9 +3,12 @@ use topcoat::{
     context::Cx,
     router::page,
     runtime::{Event, Signal, procedure, shard, signal},
-    view::{View, view},
+    view::{View,{% if ui %} attributes,{% endif %} view},
 };
 
+{% if ui -%}
+use crate::components::button::{ButtonSize, ButtonVariant, button};
+{% endif -%}
 use crate::features::todo::Todo;
 
 #[page{{ paths.page("/todos") }}]
@@ -36,7 +39,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     @input=$(|e: Event| title.set(e.target.value))
                 >
                 " "
+{%- if ui %}
+                button(attrs: attributes! { type="submit" }, "Add")
+{%- else %}
                 <button{{ classes.button }} type="submit">"Add"</button>
+{%- endif %}
             </form>
             todo_list(revision: revision)
         </main>
@@ -59,29 +66,57 @@ pub async fn todo_list(cx: &Cx, revision: Signal<u32>) -> Result<impl View> {
                     // Browser code can only capture plain values, such as the id.
                     let id = todo.id;
                     <li{{ classes.item }}>
+{%- if ui %}
+                        button(
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Sm,
+                            attrs: attributes! {
+                                @click=$(async |_e: Event| {
+                                    toggle(id).await;
+                                    revision.increment();
+                                })
+                            },
+                            if todo.done { "Undo" } else { "Done" }
+                        )
+{%- else %}
                         <button
                             {{- classes.button }}
-                            @click=$(async |_e| {
+                            @click=$(async |_e: Event| {
                                 toggle(id).await;
                                 revision.increment();
                             })
                         >
                             if todo.done { "Undo" } else { "Done" }
                         </button>
+{%- endif %}
                         if todo.done {
                             <s>(&todo.title)</s>
                         } else {
                             <span>(&todo.title)</span>
                         }
+{%- if ui %}
+                        button(
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Sm,
+                            attrs: attributes! {
+                                @click=$(async |_e: Event| {
+                                    remove(id).await;
+                                    revision.increment();
+                                })
+                            },
+                            "Delete"
+                        )
+{%- else %}
                         <button
                             {{- classes.button }}
-                            @click=$(async |_e| {
+                            @click=$(async |_e: Event| {
                                 remove(id).await;
                                 revision.increment();
                             })
                         >
                             "Delete"
                         </button>
+{%- endif %}
                     </li>
                 }
             </ul>

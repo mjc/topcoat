@@ -9,9 +9,12 @@ use topcoat::{
         error::{SeeOther, see_other},
         href, page, route,
     },
-    view::{View, view},
+    view::{View,{% if ui %} attributes,{% endif %} view},
 };
 
+{% if ui -%}
+use crate::components::button::{ButtonSize, ButtonVariant, button};
+{% endif -%}
 use crate::features::todo::Todo;
 
 #[page{{ paths.page("/todos") }}]
@@ -24,7 +27,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             <form{{ classes.paragraph }} method="post" action=(href!(create))>
                 <input{{ classes.input }} type="text" name="title" placeholder="What needs doing?" required="">
                 " "
+{%- if ui %}
+                button(attrs: attributes! { type="submit" }, "Add")
+{%- else %}
                 <button{{ classes.button }} type="submit">"Add"</button>
+{%- endif %}
             </form>
             if todos.is_empty() {
                 <p{{ classes.paragraph }}>"Nothing to do."</p>
@@ -33,9 +40,18 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     for todo in todos {
                         <li{{ classes.item }}>
                             <form method="post" action=(href!(id::toggle, id::Id(todo.id)))>
+{%- if ui %}
+                                button(
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    attrs: attributes! { type="submit" },
+                                    if todo.done { "Undo" } else { "Done" }
+                                )
+{%- else %}
                                 <button{{ classes.button }} type="submit">
                                     if todo.done { "Undo" } else { "Done" }
                                 </button>
+{%- endif %}
                             </form>
                             if todo.done {
                                 <s>(&todo.title)</s>
@@ -43,7 +59,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                 <span>(&todo.title)</span>
                             }
                             <form method="post" action=(href!(id::delete, id::Id(todo.id)))>
+{%- if ui %}
+                                button(
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Sm,
+                                    attrs: attributes! { type="submit" },
+                                    "Delete"
+                                )
+{%- else %}
                                 <button{{ classes.button }} type="submit">"Delete"</button>
+{%- endif %}
                             </form>
                         </li>
                     }

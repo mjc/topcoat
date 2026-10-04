@@ -1,8 +1,12 @@
-use std::fmt::Write as _;
+use std::{fmt::Write as _, path::Path};
 
 use askama::Template;
 use topcoat_core_grammar::pretty::pretty_print_str;
 use topcoat_font::fontsource::{Family, Style};
+use topcoat_ui::{
+    Registry,
+    manage::{self, ScaffoldOptions},
+};
 
 use super::{
     choice::{DatabaseBackend, Interaction, Routing},
@@ -24,6 +28,12 @@ const SERDE_VERSION: &str = "1";
 const TOASTY_VERSION: &str = "0.11";
 /// The Iconify set the home page renders an example icon from.
 const EXAMPLE_ICON_SET: &str = "lucide";
+/// The stylesheet at the package root: plain CSS, the Tailwind input, or the UI theme.
+const STYLESHEET: &str = "styles.css";
+/// The Topcoat UI components the starter pages use.
+const UI_COMPONENTS: &[&str] = &["button", "card"];
+/// The UI theme's declaration of its sans-serif font, naming the family it expects.
+const THEME_FONT: &str = r#"--font-sans: "Geist", sans-serif;"#;
 
 /// `src/main.rs`: the module declarations and entry point.
 #[derive(Template)]
@@ -31,6 +41,8 @@ const EXAMPLE_ICON_SET: &str = "lucide";
 struct MainRs {
     /// Whether the application stores its data with Toasty.
     toasty: bool,
+    /// Whether the application has Topcoat UI components.
+    ui: bool,
     /// Whether the application has a module of hand-written icons.
     custom_icons: bool,
 }
@@ -53,6 +65,8 @@ struct Gitignore {
 struct AppRs<'a> {
     /// The page title as a Rust string literal.
     title: &'a str,
+    /// Whether the home page uses Topcoat UI components.
+    ui: bool,
     routing: Routing,
     paths: Paths,
     classes: Classes,
@@ -169,6 +183,7 @@ struct Classes {
     heading: &'static str,
     paragraph: &'static str,
     link: &'static str,
+    /// Buttons, which use the button component instead with Topcoat UI.
     button: &'static str,
     input: &'static str,
     list: &'static str,
@@ -176,8 +191,20 @@ struct Classes {
 }
 
 impl Classes {
-    fn new(tailwind: bool) -> Self {
-        if tailwind {
+    /// Classes for the selected styling. With Topcoat UI, elements use the theme's colors.
+    fn new(tailwind: bool, ui: bool) -> Self {
+        if ui {
+            Self {
+                main: r#" class="mx-auto max-w-2xl px-4 py-16""#,
+                heading: r#" class="text-3xl font-semibold tracking-tight""#,
+                paragraph: r#" class="mt-4""#,
+                link: r#" class="font-medium text-primary underline underline-offset-4""#,
+                button: "",
+                input: r#" class="h-9 rounded-lg border border-input bg-transparent px-3 text-sm""#,
+                list: r#" class="mt-4 space-y-2""#,
+                item: r#" class="flex items-center gap-2""#,
+            }
+        } else if tailwind {
             Self {
                 main: r#" class="mx-auto max-w-2xl px-4 py-16""#,
                 heading: r#" class="text-3xl font-bold""#,
@@ -209,6 +236,8 @@ impl Classes {
 struct FormsTodos {
     paths: Paths,
     classes: Classes,
+    /// Whether buttons use the Topcoat UI button component.
+    ui: bool,
 }
 
 /// `src/app/todos/id.rs` with plain HTML forms, also used with Alpine AJAX.
@@ -225,6 +254,8 @@ struct FormsTodoId {
 struct TopcoatTodos {
     paths: Paths,
     classes: Classes,
+    /// Whether buttons use the Topcoat UI button component.
+    ui: bool,
 }
 
 /// `src/app/todos.rs` with Alpine AJAX.
@@ -236,6 +267,8 @@ struct TopcoatTodos {
 struct AlpineAjaxTodos {
     paths: Paths,
     classes: Classes,
+    /// Whether buttons use the Topcoat UI button component.
+    ui: bool,
 }
 
 /// `src/app/todos.rs` with htmx.
@@ -244,6 +277,8 @@ struct AlpineAjaxTodos {
 struct HtmxTodos {
     paths: Paths,
     classes: Classes,
+    /// Whether buttons use the Topcoat UI button component.
+    ui: bool,
 }
 
 /// `src/app/todos/id.rs` with htmx.
@@ -259,6 +294,8 @@ struct HtmxTodoId {
 struct DatastarTodos {
     paths: Paths,
     classes: Classes,
+    /// Whether buttons use the Topcoat UI button component.
+    ui: bool,
 }
 
 /// `src/app/todos/id.rs` with Datastar.
@@ -301,8 +338,6 @@ struct Readme<'a> {
 /// Returns an error if the options select an integration that cannot be generated, or
 /// if rendering or formatting a file fails.
 pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectPlan, String> {
-    check_supported(options)?;
-
     let mut manifest = Manifest::new(name.clone());
     manifest.dependency(
         "tokio",
@@ -388,7 +423,31 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     // valid string literal.
     let title = format!("{:?}", name.as_str());
     let paths = Paths(options.routing);
-    let classes = Classes::new(options.tailwind);
+    let classes = Classes::new(options.tailwind, options.ui);
+    let ui = options.ui;
+
+    // Topcoat UI: the theme as the Tailwind input and the components the pages use,
+    // planned like `topcoat ui init` followed by `topcoat ui add`.
+    if ui {
+        manifest.dependency("topcoat", topcoat().features(["ui"]))?;
+        let registry = Registry::embedded(topcoat_ui_registry::FILES)
+            .map_err(|error| format!("failed to load the UI registry: {error}"))?;
+        let scaffold = manage::scaffold(
+            &registry,
+            &ScaffoldOptions {
+                theme: None,
+                components: UI_COMPONENTS,
+            },
+        )?;
+        for file in scaffold {
+            let contents = if file.path == Path::new(STYLESHEET) {
+                theme_with_font(&file.contents, font.as_ref())
+            } else {
+                file.contents
+            };
+            plan.add(file.path, contents)?;
+        }
+    }
 
     // The todo feature, stored with the selected database integration or in memory.
     plan.add(
@@ -414,22 +473,22 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     // The todo pages, built with the selected interaction approach.
     let (todos, todo_id) = match options.interaction {
         Interaction::None => (
-            render(&FormsTodos { paths, classes })?,
+            render(&FormsTodos { paths, classes, ui })?,
             Some(render(&FormsTodoId { paths })?),
         ),
         Interaction::AlpineAjax => (
-            render(&AlpineAjaxTodos { paths, classes })?,
+            render(&AlpineAjaxTodos { paths, classes, ui })?,
             Some(render(&FormsTodoId { paths })?),
         ),
         Interaction::Htmx => (
-            render(&HtmxTodos { paths, classes })?,
+            render(&HtmxTodos { paths, classes, ui })?,
             Some(render(&HtmxTodoId { paths })?),
         ),
         Interaction::Datastar => (
-            render(&DatastarTodos { paths, classes })?,
+            render(&DatastarTodos { paths, classes, ui })?,
             Some(render(&DatastarTodoId { paths })?),
         ),
-        Interaction::Topcoat => (render(&TopcoatTodos { paths, classes })?, None),
+        Interaction::Topcoat => (render(&TopcoatTodos { paths, classes, ui })?, None),
     };
     plan.add("src/app/todos.rs", format_rust("src/app/todos.rs", &todos)?)?;
     if let Some(todo_id) = todo_id {
@@ -441,6 +500,7 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
 
     let app = render(&AppRs {
         title: &title,
+        ui,
         routing: options.routing,
         paths,
         classes,
@@ -455,6 +515,7 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     plan.add("src/app.rs", format_rust("src/app.rs", &app)?)?;
     let main = render(&MainRs {
         toasty,
+        ui,
         custom_icons,
     })?;
     plan.add("src/main.rs", format_rust("src/main.rs", &main)?)?;
@@ -467,13 +528,16 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
         plan.add("build.rs", format_rust("build.rs", &render(&build)?)?)?;
     }
 
-    // With Tailwind, the stylesheet is the Tailwind input.
-    let styles = if options.tailwind {
-        include_str!("templates/tailwind/styles.css")
-    } else {
-        include_str!("templates/base/styles.css")
-    };
-    plan.add("styles.css", styles)?;
+    // With Tailwind, the stylesheet is the Tailwind input. Topcoat UI supplies its theme
+    // as the stylesheet instead.
+    if !ui {
+        let styles = if options.tailwind {
+            include_str!("templates/tailwind/styles.css")
+        } else {
+            include_str!("templates/base/styles.css")
+        };
+        plan.add(STYLESHEET, styles)?;
+    }
 
     plan.add("Cargo.toml", manifest.render())?;
     plan.add(".gitignore", render(&Gitignore { toasty })?)?;
@@ -487,19 +551,16 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     Ok(plan)
 }
 
-/// Rejects options selecting integrations the generator does not support yet.
-fn check_supported(options: &ProjectOptions) -> Result<(), String> {
-    let unsupported: Vec<&str> = [(options.ui, "--ui")]
-        .into_iter()
-        .filter_map(|(selected, flag)| selected.then_some(flag))
-        .collect();
-    if unsupported.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "not supported yet: {}; use --minimal",
-            unsupported.join(", ")
-        ))
+/// Points the UI theme's sans-serif font at the application's Fontsource family. The
+/// theme is unchanged without a font integration, or if it does not declare its font as
+/// expected.
+fn theme_with_font(theme: &str, font: Option<&FontInfo>) -> String {
+    match font {
+        Some(font) => theme.replace(
+            THEME_FONT,
+            &format!("--font-sans: {:?}, {};", font.name, font.generic),
+        ),
+        None => theme.to_string(),
     }
 }
 
@@ -791,18 +852,65 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_integrations_that_cannot_be_generated_yet() {
-        let name = PackageName::new("my-app").unwrap();
-        let options = ProjectOptions {
+    fn ui(font: &str) -> ProjectOptions {
+        ProjectOptions {
             tailwind: true,
             icons: IconSetup::Iconify {
                 set: EXAMPLE_ICON_SET.to_string(),
             },
+            font: FontSetup::Fontsource {
+                family: font.to_string(),
+            },
             ui: true,
             ..minimal()
-        };
-        assert!(generate(&name, &options).is_err());
+        }
+    }
+
+    #[test]
+    fn ui_installs_its_theme_and_the_components_the_pages_use() {
+        let name = PackageName::new("my-app").unwrap();
+        let plan = generate(&name, &ui("geist")).unwrap();
+
+        let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
+        assert!(features(&manifest["dependencies"]["topcoat"]).contains(&"ui"));
+
+        let theme = file(&plan, STYLESHEET).unwrap();
+        assert!(theme.contains(THEME_FONT));
+        assert!(file(&plan, "components.toml").is_some());
+        let modules = file(&plan, "src/components.rs").unwrap();
+        for component in UI_COMPONENTS {
+            assert!(
+                modules.contains(&format!("pub mod {component};")),
+                "{component}"
+            );
+            let path = format!("src/components/{component}.rs");
+            assert!(file(&plan, &path).is_some(), "{component}");
+        }
+        assert!(
+            file(&plan, "src/main.rs")
+                .unwrap()
+                .contains("mod components;")
+        );
+        assert!(file(&plan, "src/app.rs").unwrap().contains("card("));
+        assert!(file(&plan, "src/app/todos.rs").unwrap().contains("button("));
+    }
+
+    #[test]
+    fn ui_theme_uses_the_chosen_font_family() {
+        let name = PackageName::new("my-app").unwrap();
+        let plan = generate(&name, &ui("roboto")).unwrap();
+
+        let theme = file(&plan, STYLESHEET).unwrap();
+        assert!(!theme.contains(THEME_FONT));
+        assert!(theme.contains("\"Roboto\""));
+    }
+
+    #[test]
+    fn default_ui_theme_declares_the_expected_font() {
+        let registry = Registry::embedded(topcoat_ui_registry::FILES).unwrap();
+        let name = registry.theme_names().next().unwrap().to_string();
+        let source = registry.theme(&name).unwrap().read_source().unwrap();
+        assert!(source.contains(THEME_FONT));
     }
 
     #[test]

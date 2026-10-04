@@ -5,9 +5,12 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, href, page, route},
-    view::{View, ViewExt, ViewHandle, component, view},
+    view::{View, ViewExt, ViewHandle,{% if ui %} attributes,{% endif %} component, view},
 };
 
+{% if ui -%}
+use crate::components::button::{ButtonSize, ButtonVariant, button};
+{% endif -%}
 use crate::features::todo::Todo;
 
 #[page{{ paths.page("/todos") }}]
@@ -25,7 +28,11 @@ pub async fn page() -> Result<impl View> {
             >
                 <input{{ classes.input }} type="text" name="title" placeholder="What needs doing?" required="">
                 " "
+{%- if ui %}
+                button(attrs: attributes! { type="submit" }, "Add")
+{%- else %}
                 <button{{ classes.button }} type="submit">"Add"</button>
+{%- endif %}
             </form>
             todo_list()
         </main>
@@ -45,6 +52,18 @@ pub async fn todo_list(cx: &Cx) -> Result<impl View> {
                 <ul{{ classes.list }}>
                     for todo in todos {
                         <li{{ classes.item }}>
+{%- if ui %}
+                            button(
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                attrs: attributes! {
+                                    hx-patch=(href!(id::toggle, id::Id(todo.id)))
+                                    hx-target="#todos"
+                                    hx-swap="outerHTML"
+                                },
+                                if todo.done { "Undo" } else { "Done" }
+                            )
+{%- else %}
                             <button
                                 {{- classes.button }}
                                 hx-patch=(href!(id::toggle, id::Id(todo.id)))
@@ -53,11 +72,24 @@ pub async fn todo_list(cx: &Cx) -> Result<impl View> {
                             >
                                 if todo.done { "Undo" } else { "Done" }
                             </button>
+{%- endif %}
                             if todo.done {
                                 <s>(&todo.title)</s>
                             } else {
                                 <span>(&todo.title)</span>
                             }
+{%- if ui %}
+                            button(
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Sm,
+                                attrs: attributes! {
+                                    hx-delete=(href!(id::delete, id::Id(todo.id)))
+                                    hx-target="#todos"
+                                    hx-swap="outerHTML"
+                                },
+                                "Delete"
+                            )
+{%- else %}
                             <button
                                 {{- classes.button }}
                                 hx-delete=(href!(id::delete, id::Id(todo.id)))
@@ -66,6 +98,7 @@ pub async fn todo_list(cx: &Cx) -> Result<impl View> {
                             >
                                 "Delete"
                             </button>
+{%- endif %}
                         </li>
                     }
                 </ul>

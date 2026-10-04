@@ -9,9 +9,12 @@ use topcoat::{
         error::{SeeOther, see_other},
         href, page, route,
     },
-    view::{View, view},
+    view::{View,{% if ui %} attributes,{% endif %} view},
 };
 
+{% if ui -%}
+use crate::components::button::{ButtonSize, ButtonVariant, button};
+{% endif -%}
 use crate::features::todo::Todo;
 
 // Alpine AJAX submits these forms in the background, follows the redirect back to
@@ -33,7 +36,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             >
                 <input{{ classes.input }} type="text" name="title" placeholder="What needs doing?" required="">
                 " "
+{%- if ui %}
+                button(attrs: attributes! { type="submit" }, "Add")
+{%- else %}
                 <button{{ classes.button }} type="submit">"Add"</button>
+{%- endif %}
             </form>
             <div id="todos">
                 if todos.is_empty() {
@@ -47,9 +54,18 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                     action=(href!(id::toggle, id::Id(todo.id)))
                                     x-target="todos"
                                 >
+{%- if ui %}
+                                    button(
+                                        variant: ButtonVariant::Outline,
+                                        size: ButtonSize::Sm,
+                                        attrs: attributes! { type="submit" },
+                                        if todo.done { "Undo" } else { "Done" }
+                                    )
+{%- else %}
                                     <button{{ classes.button }} type="submit">
                                         if todo.done { "Undo" } else { "Done" }
                                     </button>
+{%- endif %}
                                 </form>
                                 if todo.done {
                                     <s>(&todo.title)</s>
@@ -61,7 +77,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                     action=(href!(id::delete, id::Id(todo.id)))
                                     x-target="todos"
                                 >
+{%- if ui %}
+                                    button(
+                                        variant: ButtonVariant::Ghost,
+                                        size: ButtonSize::Sm,
+                                        attrs: attributes! { type="submit" },
+                                        "Delete"
+                                    )
+{%- else %}
                                     <button{{ classes.button }} type="submit">"Delete"</button>
+{%- endif %}
                                 </form>
                             </li>
                         }

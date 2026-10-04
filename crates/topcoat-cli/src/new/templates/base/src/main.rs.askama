@@ -1,4 +1,7 @@
 mod app;
+{%- if ui %}
+mod components;
+{%- endif %}
 {%- if toasty %}
 mod db;
 {%- endif %}
