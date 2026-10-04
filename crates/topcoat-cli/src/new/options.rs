@@ -1,4 +1,4 @@
-use super::choice::{DatabaseBackend, Interaction, value_name};
+use super::choice::{DatabaseBackend, Interaction, Routing, value_name};
 
 /// The Iconify set used by Topcoat UI components.
 pub const UI_ICON_SET: &str = "lucide";
@@ -6,6 +6,7 @@ pub const UI_ICON_SET: &str = "lucide";
 /// Validated choices for a new application.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectOptions {
+    pub routing: Routing,
     pub database: DatabaseSetup,
     pub interaction: Interaction,
     pub tailwind: bool,
@@ -16,7 +17,6 @@ pub struct ProjectOptions {
 
 impl ProjectOptions {
     /// The Iconify sets to stage at build time, without duplicates.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by the icon integration"))]
     pub fn icon_sets(&self) -> Vec<&str> {
         let mut sets = Vec::new();
         if let IconSetup::Iconify { set } = &self.icons {
@@ -36,6 +36,7 @@ impl ProjectOptions {
             args.extend(value);
         };
 
+        push("--routing", Some(value_name(&self.routing)));
         match &self.database {
             DatabaseSetup::None => push("--database", Some("none".into())),
             DatabaseSetup::Toasty { backend } => {

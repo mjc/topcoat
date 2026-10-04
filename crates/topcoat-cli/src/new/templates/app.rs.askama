@@ -1,0 +1,104 @@
+use topcoat::{
+    Result,
+{%- if tailwind %}
+    asset::{AssetBundle, RouterBuilderAssetExt},
+{%- else %}
+    asset::{AssetBundle, RouterBuilderAssetExt, asset},
+{%- endif %}
+{%- if iconify_example %}
+    icon::{icon, iconify::iconify_icon},
+{%- else if custom_icons %}
+    icon::icon,
+{%- endif %}
+{%- match routing %}
+{%- when Routing::Module %}
+    router::{Router, Slot, layout, module_router, page},
+{%- when Routing::Discover %}
+    router::{Router, RouterBuilderDiscoverExt, Slot, layout, page},
+{%- when Routing::Manual %}
+    router::{Router, Slot, layout, page},
+{%- endmatch %}
+{%- if tailwind %}
+    tailwind,
+{%- endif %}
+    view::{View, view},
+};
+
+/// Builds the application's router.
+pub fn router() -> Router {
+{%- match routing %}
+{%- when Routing::Module %}
+    // The pages and layouts of this module and its submodules, with paths derived
+    // from the module tree.
+    module_router!()
+{%- when Routing::Discover %}
+    // Every page and layout in the application, at the paths in their attributes.
+    Router::builder()
+        .discover()
+{%- when Routing::Manual %}
+    Router::builder()
+        .layout(root)
+        .page(home)
+{%- endmatch %}
+        .assets(AssetBundle::load().unwrap())
+        .build()
+}
+
+#[layout{{ self.path("/") }}]
+async fn root(slot: Slot<'_>) -> Result<impl View> {
+    Ok(view! {
+        <!DOCTYPE html>
+        <html lang="en">
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>{{ title }}</title>
+{%- if tailwind %}
+                <link rel="stylesheet" href=(tailwind::stylesheet!())>
+{%- else %}
+                <link rel="stylesheet" href=(asset!("styles.css"))>
+{%- endif %}
+                topcoat::dev::script()
+            </head>
+            <body>(slot)</body>
+        </html>
+    })
+}
+{%- if let Some(set) = icon_set_hint %}
+
+// Render an icon from the `{{ set }}` set with `icon(data: iconify_icon!("{{ set }}:<name>"))`,
+// importing `topcoat::icon::{icon, iconify::iconify_icon}`. Browse its icons at
+// https://icon-sets.iconify.design/{{ set }}/.
+{%- endif %}
+
+#[page{{ self.path("/") }}]
+async fn home() -> Result<impl View> {
+    Ok(view! {
+{%- if tailwind %}
+        <main class="mx-auto max-w-2xl px-4 py-16">
+            <h1 class="text-3xl font-bold">
+{%- else %}
+        <main>
+            <h1>
+{%- endif %}
+{%- if iconify_example %}
+                icon(data: iconify_icon!("lucide:sparkles"))
+                " "
+{%- else if custom_icons %}
+                icon(data: crate::icons::SPARKLE)
+                " "
+{%- endif %}
+                {{ title }}
+            </h1>
+{%- if tailwind %}
+            <p class="mt-4">
+{%- else %}
+            <p>
+{%- endif %}
+                "Edit "
+                <code>"src/app.rs"</code>
+                " and save to see your changes."
+            </p>
+        </main>
+    })
+}

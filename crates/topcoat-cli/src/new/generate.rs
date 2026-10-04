@@ -2,7 +2,7 @@ use askama::Template;
 use topcoat_core_grammar::pretty::pretty_print_str;
 
 use super::{
-    choice::Interaction,
+    choice::{Interaction, Routing},
     manifest::{Dependency, Manifest},
     name::PackageName,
     options::{DatabaseSetup, FontSetup, IconSetup, ProjectOptions},
@@ -15,27 +15,56 @@ use crate::common::format;
 const TOPCOAT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The `tokio` version generated applications depend on.
 const TOKIO_VERSION: &str = "1.51.1";
+/// The Iconify set the home page renders an example icon from.
+const EXAMPLE_ICON_SET: &str = "lucide";
 
-/// `src/main.rs`: the entry point, root layout, and home page.
+/// `src/main.rs`: the module declarations and entry point.
 #[derive(Template)]
 #[template(path = "main.rs.askama", escape = "none")]
-struct MainRs<'a> {
+struct MainRs {
+    /// Whether the application has a module of hand-written icons.
+    custom_icons: bool,
+}
+
+/// `src/app.rs`: the router, root layout, and home page.
+#[derive(Template)]
+#[template(path = "app.rs.askama", escape = "none")]
+struct AppRs<'a> {
     /// The page title as a Rust string literal.
     title: &'a str,
+    routing: Routing,
     tailwind: bool,
+    /// Whether the home page shows an icon from the default Iconify set.
+    iconify_example: bool,
+    /// The Iconify set to explain in a comment when it has no example icon.
+    icon_set_hint: Option<&'a str>,
+    /// Whether the application has a module of hand-written icons.
+    custom_icons: bool,
+}
+
+impl AppRs<'_> {
+    /// The arguments of a `#[page]` or `#[layout]` attribute for a handler at `path`:
+    /// empty with module routing, where paths come from modules.
+    fn path(&self, path: &str) -> String {
+        match self.routing {
+            Routing::Module => String::new(),
+            Routing::Discover | Routing::Manual => format!("({path:?})"),
+        }
+    }
 }
 
 /// `build.rs`: build steps of the selected integrations.
 #[derive(Template)]
 #[template(path = "build.rs.askama", escape = "none")]
-struct BuildRs {
+struct BuildRs<'a> {
     tailwind: bool,
+    icon_sets: Vec<&'a str>,
 }
 
-impl BuildRs {
+impl BuildRs<'_> {
     /// Whether any build step is selected. Without one, no build script is generated.
     fn is_needed(&self) -> bool {
-        self.tailwind
+        self.tailwind || !self.icon_sets.is_empty()
     }
 }
 
@@ -61,26 +90,55 @@ pub fn generate(name: &PackageName, options: &ProjectOptions) -> Result<ProjectP
     )?;
     manifest.dependency(
         "topcoat",
-        topcoat().features(["asset", "discover", "router", "serve", "view"]),
+        topcoat().features(["asset", "router", "serve", "view"]),
     )?;
+    if options.routing != Routing::Manual {
+        manifest.dependency("topcoat", topcoat().features(["discover"]))?;
+    }
     if options.tailwind {
         manifest.dependency("topcoat", topcoat().features(["tailwind"]))?;
         manifest.build_dependency("topcoat", topcoat().features(["tailwind"]))?;
     }
+    match &options.icons {
+        IconSetup::None => {}
+        IconSetup::Custom => manifest.dependency("topcoat", topcoat().features(["icon"]))?,
+        IconSetup::Iconify { .. } => {
+            manifest.dependency("topcoat", topcoat().features(["icon-iconify"]))?;
+            manifest.build_dependency("topcoat", topcoat().features(["icon-iconify"]))?;
+        }
+    }
 
     let mut plan = ProjectPlan::default();
+
+    // Only the default set has an icon name known to exist for the example.
+    let iconify_set = match &options.icons {
+        IconSetup::Iconify { set } => Some(set.as_str()),
+        IconSetup::None | IconSetup::Custom => None,
+    };
+    let iconify_example = iconify_set == Some(EXAMPLE_ICON_SET);
+    let custom_icons = options.icons == IconSetup::Custom;
+    if custom_icons {
+        plan.add("src/icons.rs", include_str!("templates/icons.rs"))?;
+    }
 
     // A package name has no characters that need escaping, so its debug form is a
     // valid string literal.
     let title = format!("{:?}", name.as_str());
-    let main = render(&MainRs {
+    let app = render(&AppRs {
         title: &title,
+        routing: options.routing,
         tailwind: options.tailwind,
+        iconify_example,
+        icon_set_hint: iconify_set.filter(|_| !iconify_example),
+        custom_icons,
     })?;
+    plan.add("src/app.rs", format_rust("src/app.rs", &app)?)?;
+    let main = render(&MainRs { custom_icons })?;
     plan.add("src/main.rs", format_rust("src/main.rs", &main)?)?;
 
     let build = BuildRs {
         tailwind: options.tailwind,
+        icon_sets: options.icon_sets(),
     };
     if build.is_needed() {
         plan.add("build.rs", format_rust("build.rs", &render(&build)?)?)?;
@@ -110,7 +168,6 @@ fn check_supported(options: &ProjectOptions) -> Result<(), String> {
     let unsupported: Vec<&str> = [
         (options.database != DatabaseSetup::None, "--database toasty"),
         (options.interaction != Interaction::None, "--interaction"),
-        (options.icons != IconSetup::None, "--icons"),
         (options.font != FontSetup::None, "--font"),
         (options.ui, "--ui"),
     ]
@@ -159,6 +216,7 @@ mod tests {
 
     fn minimal() -> ProjectOptions {
         ProjectOptions {
+            routing: Routing::Module,
             database: DatabaseSetup::None,
             interaction: Interaction::None,
             tailwind: false,
@@ -196,8 +254,58 @@ mod tests {
         assert!(!features(topcoat).contains(&"runtime"));
         assert!(!features(topcoat).contains(&"tailwind"));
 
-        let main = file(&plan, "src/main.rs").unwrap();
-        assert!(main.contains("\"my-app\""));
+        assert!(file(&plan, "src/app.rs").unwrap().contains("\"my-app\""));
+        assert!(file(&plan, "build.rs").is_none());
+        assert!(file(&plan, "src/icons.rs").is_none());
+    }
+
+    #[test]
+    fn manual_routing_registers_handlers_without_discovery() {
+        let name = PackageName::new("my-app").unwrap();
+        let options = ProjectOptions {
+            routing: Routing::Manual,
+            ..minimal()
+        };
+        let plan = generate(&name, &options).unwrap();
+
+        let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
+        assert!(!features(&manifest["dependencies"]["topcoat"]).contains(&"discover"));
+        let app = file(&plan, "src/app.rs").unwrap();
+        assert!(app.contains(".page(home)"));
+        assert!(app.contains("#[page(\"/\")]"));
+        assert!(!app.contains("discover"));
+    }
+
+    #[test]
+    fn iconify_stages_the_chosen_set() {
+        let name = PackageName::new("my-app").unwrap();
+        let options = ProjectOptions {
+            icons: IconSetup::Iconify {
+                set: "tabler".to_string(),
+            },
+            ..minimal()
+        };
+        let plan = generate(&name, &options).unwrap();
+
+        let manifest: toml::Table = file(&plan, "Cargo.toml").unwrap().parse().unwrap();
+        assert!(features(&manifest["dependencies"]["topcoat"]).contains(&"icon-iconify"));
+        assert!(features(&manifest["build-dependencies"]["topcoat"]).contains(&"icon-iconify"));
+        let build_script = file(&plan, "build.rs").unwrap();
+        assert!(build_script.contains(".icon_set(\"tabler\")"));
+        assert!(!build_script.contains("lucide"));
+    }
+
+    #[test]
+    fn custom_icons_live_in_their_own_module() {
+        let name = PackageName::new("my-app").unwrap();
+        let options = ProjectOptions {
+            icons: IconSetup::Custom,
+            ..minimal()
+        };
+        let plan = generate(&name, &options).unwrap();
+
+        assert!(file(&plan, "src/icons.rs").is_some());
+        assert!(file(&plan, "src/main.rs").unwrap().contains("mod icons;"));
         assert!(file(&plan, "build.rs").is_none());
     }
 
@@ -220,7 +328,7 @@ mod tests {
         assert!(build_script.contains("\"styles.css\""));
         assert!(file(&plan, "styles.css").unwrap().contains("tailwindcss"));
         assert!(
-            file(&plan, "src/main.rs")
+            file(&plan, "src/app.rs")
                 .unwrap()
                 .contains("tailwind::stylesheet!")
         );

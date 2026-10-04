@@ -1,5 +1,16 @@
 use clap::ValueEnum;
 
+/// How request paths are assigned to handlers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Routing {
+    /// Paths derived from Rust modules
+    Module,
+    /// Explicit paths in handler attributes, registered automatically
+    Discover,
+    /// Explicit paths in handler attributes, registered by hand
+    Manual,
+}
+
 /// The database integration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Database {

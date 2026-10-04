@@ -1,7 +1,7 @@
 use clap::Args;
 
 use super::{
-    choice::{Database, DatabaseBackend, Font, Icons, Interaction},
+    choice::{Database, DatabaseBackend, Font, Icons, Interaction, Routing},
     options::{DatabaseSetup, FontSetup, IconSetup, ProjectOptions, UI_ICON_SET},
 };
 
@@ -25,6 +25,9 @@ pub struct ChoiceArgs {
     /// Use the smallest setup for every option not given as a flag
     #[arg(long)]
     minimal: bool,
+    /// How request paths are assigned to handlers
+    #[arg(long, value_name = "STYLE")]
+    routing: Option<Routing>,
     /// Database integration
     #[arg(long, value_name = "INTEGRATION")]
     database: Option<Database>,
@@ -85,6 +88,7 @@ impl Preset {
     pub fn choices(self) -> PresetChoices {
         match self {
             Self::Recommended => PresetChoices {
+                routing: Routing::Module,
                 database: Database::Toasty,
                 interaction: Interaction::Topcoat,
                 tailwind: true,
@@ -93,6 +97,7 @@ impl Preset {
                 ui: true,
             },
             Self::Minimal => PresetChoices {
+                routing: Routing::Module,
                 database: Database::None,
                 interaction: Interaction::None,
                 tailwind: false,
@@ -106,6 +111,7 @@ impl Preset {
 
 /// A value for every top-level choice.
 pub struct PresetChoices {
+    pub routing: Routing,
     pub database: Database,
     pub interaction: Interaction,
     pub tailwind: bool,
@@ -143,6 +149,7 @@ impl<T> Sourced<T> {
 
 /// Application choices collected so far. A `None` field is still open.
 pub struct Input {
+    pub routing: Option<Sourced<Routing>>,
     pub database: Option<Sourced<Database>>,
     pub database_backend: Option<DatabaseBackend>,
     pub interaction: Option<Sourced<Interaction>>,
@@ -164,6 +171,7 @@ impl Input {
 
         let preset = args.preset();
         let mut input = Self {
+            routing: args.routing.map(flag),
             database: args.database.map(flag),
             database_backend: args.database_backend,
             interaction: args.interaction.map(flag),
@@ -185,6 +193,8 @@ impl Input {
     fn fill(&mut self, preset: Preset) {
         let origin = Origin::Preset(preset);
         let choices = preset.choices();
+        self.routing
+            .get_or_insert(Sourced::new(choices.routing, origin));
         self.database
             .get_or_insert(Sourced::new(choices.database, origin));
         self.interaction
@@ -219,6 +229,7 @@ impl Input {
     /// The open top-level choices, in the order the wizard asks them.
     pub fn questions(&self) -> Vec<Question> {
         [
+            (self.routing.is_none(), Question::Routing),
             (self.database.is_none(), Question::Database),
             (self.interaction.is_none(), Question::Interaction),
             (self.tailwind.is_none(), Question::Tailwind),
@@ -236,14 +247,24 @@ impl Input {
     /// Returns an error naming the missing flags if a top-level choice is still open,
     /// or explaining how to resolve choices that cannot be combined.
     pub fn resolve(&self) -> Result<Resolution, String> {
-        let (Some(database), Some(interaction), Some(tailwind), Some(icons), Some(font), Some(ui)) = (
+        let (
+            Some(routing),
+            Some(database),
+            Some(interaction),
+            Some(tailwind),
+            Some(icons),
+            Some(font),
+            Some(ui),
+        ) = (
+            self.routing,
             self.database,
             self.interaction,
             self.tailwind,
             self.icons,
             self.font,
             self.ui,
-        ) else {
+        )
+        else {
             let flags: Vec<&str> = self.questions().into_iter().map(Question::flag).collect();
             return Err(format!(
                 "missing choices: pass {}, or use --recommended or --minimal",
@@ -303,6 +324,7 @@ impl Input {
         };
 
         let options = ProjectOptions {
+            routing: routing.value,
             database: database_setup,
             interaction: interaction.value,
             tailwind: tailwind.value,
@@ -338,6 +360,7 @@ impl Input {
 /// An open top-level choice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Question {
+    Routing,
     Database,
     Interaction,
     Tailwind,
@@ -350,6 +373,7 @@ impl Question {
     /// The flags that answer the question.
     pub fn flag(self) -> &'static str {
         match self {
+            Self::Routing => "--routing",
             Self::Database => "--database",
             Self::Interaction => "--interaction",
             Self::Tailwind => "--tailwind or --no-tailwind",
@@ -533,6 +557,8 @@ mod tests {
             &["--minimal"],
             &[
                 "--minimal",
+                "--routing",
+                "manual",
                 "--icons",
                 "iconify",
                 "--icon-set",
