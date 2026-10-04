@@ -3558,12 +3558,14 @@ dependencies = [
  "sha2 0.11.0",
  "thiserror",
  "toml",
+ "topcoat-ui-registry",
 ]
 
 [[package]]
 name = "topcoat-ui-registry"
 version = "0.10.0"
 dependencies = [
+ "toml",
  "topcoat",
  "topcoat-icon",
 ]
