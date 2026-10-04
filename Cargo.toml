@@ -148,6 +148,7 @@ topcoat-view-macro = { version = "0.10.0", path = "crates/topcoat-view/macro" }
 
 anyhow = "1.0"
 anymap3 = "1.0"
+askama = "0.16.1"
 base64 = "0.22"
 boxcar = "0.2"
 bytes = "1"
@@ -202,6 +203,7 @@ toasty = "0.7"
 tokio = "1.51.1"
 tokio-util = "0.7"
 toml = "1.1.2"
+toml_edit = "0.25.12"
 tokio-tungstenite = { version = "0.29", default-features = false }
 tower = "0.5"
 tower-http = "0.7"

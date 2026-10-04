@@ -9,7 +9,7 @@ use console::style;
 use tokio::{io::AsyncWriteExt, process::Command};
 use topcoat_core_grammar::pretty::{Registry, pretty_print_str};
 
-use crate::fmt::error::Error;
+use crate::{common::format, fmt::error::Error};
 
 #[derive(Args)]
 #[command(version, about = "Format the content of view macro invocations in Rust source files.", long_about = None)]
@@ -38,80 +38,25 @@ pub struct FmtCommand {
 
 impl FmtCommand {
     pub async fn run(&self) {
-        let registry = {
-            // The full set of macros `topcoat fmt` knows how to format.
-            const ALL_MACROS: &[&str] = &[
-                "view",
-                "attributes",
-                "class",
-                "live",
-                "emit",
-                "font_face",
-                "font",
-                "fontsource_font_face",
-                "fontsource_font",
-                "mail",
-            ];
-
-            let mut registry = Registry::new();
-
-            let selected: BTreeSet<&str> = match &self.macros {
-                Some(names) => names.iter().map(String::as_str).collect(),
-                None => ALL_MACROS.iter().copied().collect(),
-            };
-
-            for name in &selected {
-                if !ALL_MACROS.contains(name) {
-                    eprintln!(
-                        "{}",
-                        style(format!(
-                            "unknown macro '{name}'; supported macros are: {}",
-                            ALL_MACROS.join(", ")
-                        ))
-                        .red()
-                    );
-                    std::process::exit(1);
+        let registry = match &self.macros {
+            None => format::registry(),
+            Some(names) => {
+                let mut registry = Registry::new();
+                for name in names {
+                    if !format::register(&mut registry, name) {
+                        eprintln!(
+                            "{}",
+                            style(format!(
+                                "unknown macro '{name}'; supported macros are: {}",
+                                format::MACROS.join(", ")
+                            ))
+                            .red()
+                        );
+                        std::process::exit(1);
+                    }
                 }
-            }
-
-            if selected.contains("view") {
-                registry.register_macro::<topcoat_view_grammar::view::View>("view");
-            }
-            if selected.contains("attributes") {
                 registry
-                    .register_macro::<topcoat_view_grammar::attributes::Attributes>("attributes");
             }
-            if selected.contains("class") {
-                registry.register_macro::<topcoat_view_grammar::class::Class>("class");
-            }
-            if selected.contains("live") {
-                registry.register_macro::<topcoat_view_grammar::live::Live>("live");
-            }
-            if selected.contains("emit") {
-                registry.register_macro::<topcoat_view_grammar::live::Emit>("emit");
-            }
-            if selected.contains("font_face") {
-                registry.register_macro::<topcoat_font_grammar::font_face::FontFace>("font_face");
-            }
-            if selected.contains("font") {
-                registry.register_macro::<topcoat_font_grammar::font::Font>("font");
-            }
-            if selected.contains("fontsource_font_face") {
-                registry
-                    .register_macro::<topcoat_font_grammar::fontsource::font_face::FontsourceFontFace>(
-                        "fontsource_font_face",
-                    );
-            }
-            if selected.contains("fontsource_font") {
-                registry.register_macro::<topcoat_font_grammar::fontsource::font::FontsourceFont>(
-                    "fontsource_font",
-                );
-            }
-            if selected.contains("mail") {
-                registry.register_macro::<topcoat_mail_grammar::mail::Mail>("mail");
-            }
-
-            registry
         };
 
         let start = Instant::now();

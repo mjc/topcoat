@@ -14,6 +14,10 @@ const UI_FONT_FAMILY: &str = "geist";
 
 /// Command-line flags for the application choices.
 #[derive(Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is a command-line switch"
+)]
 pub struct ChoiceArgs {
     /// Use the recommended choice for every option not given as a flag
     #[arg(long, conflicts_with = "minimal")]
@@ -120,6 +124,7 @@ pub enum Origin {
     /// A prerequisite of another choice.
     Inferred,
     /// An answer to a wizard question.
+    #[expect(dead_code, reason = "constructed by the wizard")]
     Prompt,
 }
 
@@ -186,7 +191,8 @@ impl Input {
             .get_or_insert(Sourced::new(choices.interaction, origin));
         self.tailwind
             .get_or_insert(Sourced::new(choices.tailwind, origin));
-        self.icons.get_or_insert(Sourced::new(choices.icons, origin));
+        self.icons
+            .get_or_insert(Sourced::new(choices.icons, origin));
         self.font.get_or_insert(Sourced::new(choices.font, origin));
         self.ui.get_or_insert(Sourced::new(choices.ui, origin));
     }
@@ -202,7 +208,9 @@ impl Input {
         }
 
         let ui_unavailable = self.tailwind.is_some_and(|tailwind| !tailwind.value)
-            || self.icons.is_some_and(|icons| icons.value != Icons::Iconify);
+            || self
+                .icons
+                .is_some_and(|icons| icons.value != Icons::Iconify);
         if ui_unavailable {
             self.ui.get_or_insert(Sourced::new(false, Origin::Inferred));
         }
@@ -430,8 +438,14 @@ mod tests {
 
     #[test]
     fn flags_override_preset_choices() {
-        let options = resolve(&["--recommended", "--database", "none", "--interaction", "htmx"])
-            .unwrap();
+        let options = resolve(&[
+            "--recommended",
+            "--database",
+            "none",
+            "--interaction",
+            "htmx",
+        ])
+        .unwrap();
         assert_eq!(options.database, DatabaseSetup::None);
         assert_eq!(options.interaction, Interaction::Htmx);
     }
@@ -465,8 +479,16 @@ mod tests {
 
     #[test]
     fn ui_is_not_asked_once_unavailable() {
-        assert!(!input(&["--no-tailwind"]).questions().contains(&Question::Ui));
-        assert!(!input(&["--icons", "none"]).questions().contains(&Question::Ui));
+        assert!(
+            !input(&["--no-tailwind"])
+                .questions()
+                .contains(&Question::Ui)
+        );
+        assert!(
+            !input(&["--icons", "none"])
+                .questions()
+                .contains(&Question::Ui)
+        );
         assert!(input(&["--tailwind"]).questions().contains(&Question::Ui));
     }
 

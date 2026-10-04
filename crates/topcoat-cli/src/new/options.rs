@@ -16,6 +16,7 @@ pub struct ProjectOptions {
 
 impl ProjectOptions {
     /// The Iconify sets to stage at build time, without duplicates.
+    #[cfg_attr(not(test), expect(dead_code, reason = "used by the icon integration"))]
     pub fn icon_sets(&self) -> Vec<&str> {
         let mut sets = Vec::new();
         if let IconSetup::Iconify { set } = &self.icons {
