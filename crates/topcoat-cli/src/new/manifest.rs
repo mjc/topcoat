@@ -89,10 +89,6 @@ impl Manifest {
 
     /// Adds a build dependency, merging it with an earlier requirement on the same
     /// crate.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by integrations with a build script")
-    )]
     pub fn build_dependency(
         &mut self,
         name: &'static str,
