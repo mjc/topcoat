@@ -13,6 +13,7 @@ impl Expr {
         rust: &mut TokenStream,
         js: &mut Js,
         names: &mut NameResolver,
+        returns_value: bool,
     ) -> syn::Result<()> {
         js.push_str("{ ");
         names.push_scope();
@@ -20,7 +21,7 @@ impl Expr {
         let mut stmts = TokenStream::new();
         let last = block.stmts.len().wrapping_sub(1);
         for (i, stmt) in block.stmts.iter().enumerate() {
-            Self::stmt(stmt, &mut stmts, js, names, i == last)?;
+            Self::stmt(stmt, &mut stmts, js, names, returns_value && i == last)?;
         }
 
         names.pop_scope();

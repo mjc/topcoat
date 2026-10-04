@@ -220,4 +220,28 @@ mod tests {
             assert!(syn::parse_str::<Expr>(source).is_err(), "{source}");
         }
     }
+
+    #[test]
+    fn statement_jumps_keep_the_enclosing_function() {
+        // String inputs preserve optional semicolons that formatters insert.
+        for source in [
+            "|| { loop { if true { break } }; 1.0 }",
+            "|| { loop { if false { continue } break }; 1.0 }",
+            "|| { if true { return 1.0 } 2.0 }",
+            "|| { while false {} }",
+            "|| { loop { { if true { break } } }; 1.0 }",
+        ] {
+            let expr: Expr = syn::parse_str(source).unwrap();
+            let emitted = expr.expr_to_tokens().unwrap().to_string();
+            assert!(!emitted.contains("(() =>"), "{source}: {emitted}");
+            for invalid in [
+                "return break",
+                "return continue",
+                "return return",
+                "return while",
+            ] {
+                assert!(!emitted.contains(invalid), "{source}: {emitted}");
+            }
+        }
+    }
 }

@@ -42,13 +42,26 @@ impl Expr {
             Stmt::Expr(expr, semi) => {
                 // A trailing expression (no semicolon) is the block's value, so
                 // it becomes the JavaScript `return`.
-                let returns = is_last && semi.is_none();
+                let returns = is_last
+                    && semi.is_none()
+                    && !matches!(
+                        expr,
+                        syn::Expr::Break(_)
+                            | syn::Expr::Continue(_)
+                            | syn::Expr::Return(_)
+                            | syn::Expr::Loop(_)
+                            | syn::Expr::While(_)
+                    );
                 if returns {
                     js.push_str("return ");
                 }
 
                 let mut value = TokenStream::new();
-                Self::dispatch(expr, &mut value, js, names)?;
+                if returns {
+                    Self::dispatch(expr, &mut value, js, names)?;
+                } else {
+                    Self::statement_expr(expr, &mut value, js, names)?;
+                }
 
                 if returns {
                     js.push(';');
@@ -64,5 +77,24 @@ impl Expr {
             }
         }
         Ok(())
+    }
+
+    /// Emits statement blocks and conditionals in the enclosing function so
+    /// their jumps still target the surrounding loop or closure.
+    fn statement_expr(
+        expr: &syn::Expr,
+        rust: &mut TokenStream,
+        js: &mut Js,
+        names: &mut NameResolver,
+    ) -> syn::Result<()> {
+        match expr {
+            syn::Expr::If(inner) => {
+                Self::expr_if_inner(inner, js, names, false)?.to_tokens(rust);
+                Ok(())
+            }
+            syn::Expr::Block(inner) => Self::block(&inner.block, rust, js, names, false),
+            syn::Expr::Paren(inner) => Self::statement_expr(&inner.expr, rust, js, names),
+            other => Self::dispatch(other, rust, js, names),
+        }
     }
 }

@@ -19,7 +19,7 @@ impl Expr {
         js.push_str(".dehydrate()) ");
         quote! { while #topcoat_runtime::Surrogate::into_real(#cond) }.to_tokens(rust);
 
-        Self::block(&expr.body, rust, js, names)?;
+        Self::block(&expr.body, rust, js, names, false)?;
         Ok(())
     }
 }

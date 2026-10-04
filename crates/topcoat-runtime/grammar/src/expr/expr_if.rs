@@ -7,9 +7,7 @@ use super::js::Js;
 use crate::expr::{Expr, contains_await::ContainsAwait, name_resolver::NameResolver};
 
 impl Expr {
-    /// Lowers `if cond { ... } else { ... }`. The JavaScript side is wrapped
-    /// in an IIFE so the same shape works in both expression and statement
-    /// position. This expression can also hold async expressions.
+    /// Lowers a value-producing conditional using a JavaScript function.
     pub(super) fn expr_if(
         if_expr: &ExprIf,
         rust: &mut TokenStream,
@@ -23,35 +21,44 @@ impl Expr {
             "(() => "
         };
         js.push_str(predicate);
-        let rust_if = Self::expr_if_inner(if_expr, js, names)?;
+        js.push_str("{ ");
+        let rust_if = Self::expr_if_inner(if_expr, js, names, true)?;
+        js.push_str(" }");
         js.push_str(if is_async { ")())" } else { ")()" });
         rust_if.to_tokens(rust);
         Ok(())
     }
 
-    fn expr_if_inner(
+    pub(super) fn expr_if_inner(
         if_expr: &ExprIf,
         js: &mut Js,
         names: &mut NameResolver,
+        returns_value: bool,
     ) -> syn::Result<TokenStream> {
-        js.push_str("{ if (");
+        js.push_str("if (");
         let mut cond = TokenStream::new();
         Self::dispatch(&if_expr.cond, &mut cond, js, names)?;
         js.push_str(".dehydrate()) ");
 
         let mut then_tokens = TokenStream::new();
-        Self::block(&if_expr.then_branch, &mut then_tokens, js, names)?;
+        Self::block(
+            &if_expr.then_branch,
+            &mut then_tokens,
+            js,
+            names,
+            returns_value,
+        )?;
 
         let mut else_tokens = TokenStream::new();
         let else_kw = if let Some((else_token, else_branch)) = &if_expr.else_branch {
             js.push_str(" else ");
             match &**else_branch {
                 SynExpr::If(inner) => {
-                    let inner_rust = Self::expr_if_inner(inner, js, names)?;
+                    let inner_rust = Self::expr_if_inner(inner, js, names, returns_value)?;
                     inner_rust.to_tokens(&mut else_tokens);
                 }
                 SynExpr::Block(block) => {
-                    Self::block(&block.block, &mut else_tokens, js, names)?;
+                    Self::block(&block.block, &mut else_tokens, js, names, returns_value)?;
                 }
                 other => {
                     return Err(syn::Error::new_spanned(other, "unsupported else branch"));
@@ -61,7 +68,6 @@ impl Expr {
         } else {
             None
         };
-        js.push_str(" }");
 
         let if_token = &if_expr.if_token;
         let rust = if let Some(else_kw) = else_kw {

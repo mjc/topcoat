@@ -38,7 +38,7 @@ impl Expr {
         match &*closure.body {
             // A block body maps directly onto the arrow function body without
             // the IIFE wrapper that a block expression would need.
-            SynExpr::Block(block) => Self::block(&block.block, &mut body, js, names)?,
+            SynExpr::Block(block) => Self::block(&block.block, &mut body, js, names, true)?,
             other => Self::dispatch(other, &mut body, js, names)?,
         }
         names.pop_scope();

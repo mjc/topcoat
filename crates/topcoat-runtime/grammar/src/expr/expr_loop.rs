@@ -14,7 +14,7 @@ impl Expr {
     ) -> syn::Result<()> {
         js.push_str("while (true) ");
         quote! { loop }.to_tokens(rust);
-        Self::block(&expr.body, rust, js, names)?;
+        Self::block(&expr.body, rust, js, names, false)?;
         Ok(())
     }
 }
