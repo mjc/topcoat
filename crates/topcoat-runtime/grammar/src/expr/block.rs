@@ -6,7 +6,7 @@ use super::js::Js;
 use crate::expr::{Expr, name_resolver::NameResolver};
 
 impl Expr {
-    /// Lowers a block, optionally returning its trailing expression as a value.
+    /// Lowers a block, optionally returning its trailing value in JavaScript.
     pub(super) fn block(
         block: &Block,
         rust: &mut TokenStream,

@@ -42,7 +42,8 @@ impl Expr {
             Stmt::Expr(expr, semi) => {
                 // A trailing expression (no semicolon) is the block's value, so
                 // it becomes the JavaScript `return`.
-                let returns = is_tail && semi.is_none() && !Self::is_statement_only(expr);
+                let is_tail_value = is_tail && semi.is_none();
+                let returns = is_tail_value && !Self::is_statement_only(expr);
                 if returns {
                     js.push_str("return ");
                 }
@@ -56,11 +57,12 @@ impl Expr {
 
                 if returns {
                     js.push(';');
-                    value.to_tokens(rust);
                 } else {
                     js.push_str("; ");
-                    quote! { #value; }.to_tokens(rust);
                 }
+
+                value.to_tokens(rust);
+                semi.to_tokens(rust);
             }
             Stmt::Macro(stmt_macro) => Self::stmt_macro(stmt_macro, rust, js, names)?,
             other @ Stmt::Item(_) => {
@@ -83,10 +85,21 @@ impl Expr {
                 Self::expr_if_inner(inner, js, names, false)?.to_tokens(rust);
             }
             SynExpr::Block(inner) => Self::block(&inner.block, rust, js, names, false)?,
+            SynExpr::Macro(inner) => Self::stmt_macro_expr(inner, rust, js, names)?,
             SynExpr::Paren(inner) => {
-                let mut nested = TokenStream::new();
-                Self::stmt_expr(&inner.expr, &mut nested, js, names)?;
-                quote! { (#nested) }.to_tokens(rust);
+                let mut unwrapped = inner.expr.as_ref();
+                while let SynExpr::Paren(paren) = unwrapped {
+                    unwrapped = paren.expr.as_ref();
+                }
+                if matches!(unwrapped, SynExpr::If(_) | SynExpr::Block(_))
+                    || Self::is_statement_only(unwrapped)
+                {
+                    let mut nested = TokenStream::new();
+                    Self::stmt_expr(&inner.expr, &mut nested, js, names)?;
+                    quote! { (#nested) }.to_tokens(rust);
+                } else {
+                    Self::expr_paren(inner, rust, js, names)?;
+                }
             }
             other => Self::dispatch(other, rust, js, names)?,
         }

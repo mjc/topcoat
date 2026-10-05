@@ -182,3 +182,30 @@ fn parenthesized_tail_jumps_and_loops_execute() {
         }
     }
 }
+
+#[test]
+fn nested_parenthesized_statements_execute() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    for asynchronous in [false, true] {
+        let prefix = if asynchronous { "async " } else { "" };
+        for depth in [1, 2, 4] {
+            for (statement, expected) in [
+                ("raw!(\"function () {}\", ())", 9.0),
+                ("raw!(\"{ first: 7, second: 9 }\", ())", 9.0),
+                ("if true { break; }", 9.0),
+                ("{ break; }", 9.0),
+                ("while false {}", 9.0),
+                ("loop { break; }", 9.0),
+                ("return 7.0", 7.0),
+            ] {
+                let statement = format!("{}{statement}{}", "(".repeat(depth), ")".repeat(depth));
+                check(
+                    &mut engine,
+                    &format!("{prefix}|| {{ loop {{ {statement}; break; }} 9.0 }}"),
+                    expected,
+                    asynchronous,
+                );
+            }
+        }
+    }
+}

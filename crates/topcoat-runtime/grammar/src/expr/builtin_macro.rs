@@ -26,6 +26,24 @@ impl Expr {
         BuiltinMacro::parse(&expr.mac)?.lower(rust, js, names)
     }
 
+    pub(super) fn stmt_macro_expr(
+        expr: &ExprMacro,
+        rust: &mut TokenStream,
+        js: &mut Js,
+        names: &mut NameResolver,
+    ) -> syn::Result<()> {
+        match BuiltinMacro::parse(&expr.mac)? {
+            BuiltinMacro::Raw(raw) => {
+                // Keep discarded expressions in expression position, including
+                // fragments with a trailing JavaScript semicolon.
+                if raw.has_expression_source() {
+                    js.push_str("0, ");
+                }
+                raw.lower(rust, js, names)
+            }
+        }
+    }
+
     pub(super) fn stmt_macro(
         stmt_macro: &StmtMacro,
         rust: &mut TokenStream,
@@ -98,6 +116,27 @@ impl Parse for RawMacro {
 }
 
 impl RawMacro {
+    fn has_expression_source(&self) -> bool {
+        let source = self.js.value();
+        let mut rest = source.as_str();
+        loop {
+            rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+            if let Some(comment) = rest.strip_prefix("//") {
+                let end = comment
+                    .find(['\n', '\r', '\u{2028}', '\u{2029}'])
+                    .unwrap_or(comment.len());
+                rest = &comment[end..];
+            } else if let Some(comment) = rest.strip_prefix("/*") {
+                let Some(end) = comment.find("*/") else {
+                    return true;
+                };
+                rest = &comment[end + 2..];
+            } else {
+                return !rest.is_empty() && !rest.starts_with(';');
+            }
+        }
+    }
+
     fn lower(
         &self,
         rust: &mut TokenStream,

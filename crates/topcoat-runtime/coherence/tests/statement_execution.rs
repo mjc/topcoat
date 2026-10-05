@@ -213,6 +213,10 @@ fn async_taken_jumps_follow_awaited_conditions() {
 }
 
 #[test]
+#[expect(
+    path_statements,
+    reason = "The test exercises discarded scoped bindings."
+)]
 fn statement_and_value_scopes_remain_distinct() {
     for condition in [false, true] {
         coherent!({
@@ -260,4 +264,150 @@ fn statement_and_value_scopes_remain_distinct() {
         }),
     )
     .assert();
+}
+
+#[test]
+#[expect(
+    unused_must_use,
+    reason = "The test exercises a discarded method call."
+)]
+fn discarded_parenthesized_raw_expressions_keep_expression_syntax() {
+    coherent!({
+        (raw!("function () {}", ()));
+        7.0
+    });
+    coherent!({
+        (raw!("{ answer: 7, extra: 9 }", ()));
+        7.0
+    });
+    coherent!({
+        (raw!("{ clone: () => cx.hydrate(false) }", false).clone());
+        7.0
+    });
+    coherent!(async => {
+        (raw!("function () {}", ()));
+        7.0
+    });
+}
+
+#[test]
+fn discarded_parenthesized_expressions_preserve_side_effects() {
+    let trace = RefCell::new(Vec::<String>::new());
+    check_trace(
+        expr!(|| {
+            raw!("let trace = [];", ());
+            (raw!(
+                "{ first: trace.push('first'), second: trace.push('second') }",
+                {
+                    trace.borrow_mut().push("first".into());
+                    trace.borrow_mut().push("second".into());
+                }
+            ));
+            (raw!("function () { trace.push('unexpected'); }", ()));
+            raw!("cx.hydrate(trace.join(','))", trace.borrow().join(","))
+        }),
+        &["first", "second"].join(","),
+    );
+}
+
+#[test]
+fn discarded_block_tail_raw_expressions_keep_expression_syntax() {
+    coherent!({
+        {
+            raw!("", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("; /* empty */ // still empty\n;", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("/* empty */\u{feff}// still empty\n", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("/* prefix */ // still a prefix\nfunction () {}", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("function () {}", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("{ answer: 7, extra: 9 }", ())
+        };
+        7.0
+    });
+    coherent!(async => {
+        {
+            raw!("function () {}", ())
+        };
+        7.0
+    });
+}
+
+#[test]
+fn discarded_raw_tails_preserve_precedence_and_side_effects() {
+    let trace = RefCell::new(Vec::<String>::new());
+    check_trace(
+        expr!(|| {
+            raw!("let trace = [];", ());
+            {
+                raw!(
+                    "true && trace.push('and')",
+                    trace.borrow_mut().push("and".into())
+                )
+            };
+            {
+                raw!(
+                    "true ? trace.push('then') : trace.push('else')",
+                    trace.borrow_mut().push("then".into())
+                )
+            };
+            {
+                raw!(
+                    "trace.push('semicolon');",
+                    trace.borrow_mut().push("semicolon".into())
+                )
+            };
+            raw!("cx.hydrate(trace.join(','))", trace.borrow().join(","))
+        }),
+        &["and", "then", "semicolon"].join(","),
+    );
+}
+
+#[test]
+fn parenthesized_statement_forms_preserve_the_loop_target() {
+    coherent!({
+        while true {
+            (if true {
+                break;
+            });
+        }
+        7.0
+    });
+    coherent!({
+        loop {
+            ({
+                break;
+            });
+        }
+        7.0
+    });
+}
+
+#[test]
+fn parenthesized_returns_preserve_sync_and_async_closure_targets() {
+    coherent!({ (return 7.0) });
+    coherent!(async => { (((return 7.0))) });
 }
