@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{Expr as SynExpr, Stmt};
 
-use super::js::Js;
+use super::{builtin_macro::RawReturn, js::Js};
 use crate::expr::{
     Expr,
     name_resolver::{LocalBindingKind, NameResolver},
@@ -93,7 +93,7 @@ impl Expr {
         }
 
         if let Some(SynExpr::Macro(raw)) = expr {
-            return Self::expr_macro_return(raw, rust, js, names);
+            return Self::expr_macro_value(raw, rust, js, names, RawReturn::Boxed);
         }
 
         // Promise resolution checks for an inherited `then` property.

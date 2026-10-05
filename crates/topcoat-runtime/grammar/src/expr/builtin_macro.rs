@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Write};
 
 use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, quote};
@@ -26,14 +26,15 @@ impl Expr {
         BuiltinMacro::parse(&expr.mac)?.lower(rust, js, names)
     }
 
-    pub(super) fn expr_macro_return(
+    pub(super) fn expr_macro_value(
         expr: &ExprMacro,
         rust: &mut TokenStream,
         js: &mut Js,
         names: &mut NameResolver,
+        returning: RawReturn<'_>,
     ) -> syn::Result<()> {
         match BuiltinMacro::parse(&expr.mac)? {
-            BuiltinMacro::Raw(raw) => raw.lower(rust, js, names, true),
+            BuiltinMacro::Raw(raw) => raw.lower(rust, js, names, Some(returning)),
         }
     }
 
@@ -50,7 +51,7 @@ impl Expr {
                 if raw.has_expression_source() {
                     js.push_str("0, ");
                 }
-                raw.lower(rust, js, names, false)
+                raw.lower(rust, js, names, None)
             }
         }
     }
@@ -101,7 +102,36 @@ impl BuiltinMacro {
         names: &mut NameResolver,
     ) -> syn::Result<()> {
         match self {
-            Self::Raw(raw) => raw.lower(rust, js, names, false),
+            Self::Raw(raw) => raw.lower(rust, js, names, None),
+        }
+    }
+}
+
+pub(super) enum RawReturn<'a> {
+    Boxed,
+    Break(&'a str),
+    Return(&'a str),
+}
+
+impl RawReturn<'_> {
+    fn prefix(&self, js: &mut Js) {
+        match self {
+            Self::Boxed => js.push_str("return { __proto__: null, value: ("),
+            Self::Break(marker) | Self::Return(marker) => {
+                write!(js, "{marker}.value = (").unwrap();
+            }
+        }
+    }
+
+    fn suffix(&self, js: &mut Js) {
+        match self {
+            Self::Boxed => js.push_str(") };\n"),
+            Self::Break(marker) => {
+                writeln!(js, "); {marker}.continuing = false; throw {marker};").unwrap();
+            }
+            Self::Return(marker) => {
+                writeln!(js, "); throw {marker};").unwrap();
+            }
         }
     }
 }
@@ -158,7 +188,14 @@ impl RawMacro {
                 };
                 rest = &comment[end + 2..];
             } else {
-                return !rest.is_empty() && !rest.starts_with(';');
+                let is_declaration = ress::Scanner::new(rest).next().is_some_and(|item| {
+                    item.is_ok_and(|item| {
+                        ["let", "const", "var"]
+                            .iter()
+                            .any(|keyword| item.token.matches_keyword_str(keyword))
+                    })
+                });
+                return !rest.is_empty() && !rest.starts_with(';') && !is_declaration;
             }
         }
     }
@@ -168,11 +205,11 @@ impl RawMacro {
         rust: &mut TokenStream,
         js: &mut Js,
         names: &mut NameResolver,
-        returning: bool,
+        returning: Option<RawReturn<'_>>,
     ) -> syn::Result<()> {
         let source = self.js.value();
-        if returning {
-            js.push_str("return { __proto__: null, value: (");
+        if let Some(returning) = returning {
+            returning.prefix(js);
             let end = if let Some(value) = self.return_source(&source)? {
                 js.push_str("(\n");
                 self.interpolate_js(value, js, names)?;
@@ -182,13 +219,14 @@ impl RawMacro {
                 js.push_str("undefined");
                 0
             };
-            js.push_str(") };\n");
+            returning.suffix(js);
             // Keep unreachable declarations and captures in the original scope.
             self.interpolate_js(&source[end..], js, names)?;
-            js.push('\n');
         } else {
             self.interpolate_js(&source, js, names)?;
         }
+        // End line comments before appending generated code.
+        js.push('\n');
 
         match &self.rust {
             Some(rust_expr) => {

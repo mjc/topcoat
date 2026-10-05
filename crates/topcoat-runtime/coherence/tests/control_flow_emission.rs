@@ -375,3 +375,64 @@ fn async_raw_value_returns_preserve_tokens_and_termination() {
         check(&mut engine, &source, "payload".to_owned(), true);
     }
 }
+
+#[test]
+fn discarded_raw_declarations_preserve_side_effects() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    for asynchronous in [false, true] {
+        let prefix = if asynchronous { "async " } else { "" };
+        for declaration in [
+            "let value = 'declaration'; trace.push(value);",
+            "const value = 'declaration'; trace.push(value);",
+            "var value = 'declaration'; trace.push(value);",
+            "let/* binding */value = 'declaration'; trace.push(value);",
+            "const/* binding */value = 'declaration'; trace.push(value);",
+            "var/* binding */value = 'declaration'; trace.push(value);",
+            "let[value] = ['declaration']; trace.push(value);",
+            "const{value} = {value: 'declaration'}; trace.push(value);",
+            "var[value] = ['declaration']; trace.push(value);",
+        ] {
+            for leading in ["", "\u{feff}/* prefix */ // prefix\n"] {
+                let raw = format!("raw!({:?}, ())", format!("{leading}{declaration}"));
+                for statement in [
+                    format!("{{ {raw} }};"),
+                    format!("if true {{ {raw} }}"),
+                    format!("{{ if true {{ {raw} }} }};"),
+                ] {
+                    let source = format!(
+                        "{prefix}|| {{ raw!(\"let trace = [];\", ()); {statement} raw!(\"cx.hydrate(trace.join(','))\", String::new()) }}"
+                    );
+                    check(&mut engine, &source, "declaration".to_owned(), asynchronous);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn raw_line_comments_preserve_value_and_jump_boundaries() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    for asynchronous in [false, true] {
+        let prefix = if asynchronous { "async " } else { "" };
+        for suffix in [" // value", "; // value", " /* value */", "; /* value */"] {
+            let raw = format!(
+                "raw!({:?}, String::new())",
+                format!("cx.hydrate('payload'){suffix}")
+            );
+            for expression in [
+                format!("{{ {raw} }}"),
+                format!(
+                    "if true {{ {raw} }} else {{ raw!(\"cx.hydrate('unexpected')\", String::new()) }}"
+                ),
+                format!("loop {{ break {raw}; }}"),
+                format!("loop {{ let _value = {{ if true {{ break {raw}; }} 9.0 }}; }}"),
+                format!(
+                    "{{ if true {{ return {raw}; }} raw!(\"cx.hydrate('unexpected')\", String::new()) }}"
+                ),
+            ] {
+                let source = format!("{prefix}|| {{ let value = {expression}; value }}");
+                check(&mut engine, &source, "payload".to_owned(), asynchronous);
+            }
+        }
+    }
+}

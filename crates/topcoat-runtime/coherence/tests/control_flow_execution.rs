@@ -1,11 +1,14 @@
 use std::{
     cell::{Cell, RefCell},
     ops::AsyncFnOnce,
-    panic::catch_unwind,
+    panic::{catch_unwind, panic_any},
 };
 
 use topcoat::runtime::{Expr, Surrogate, Surrogated, expr};
 use topcoat_runtime_coherence::{Awaitable, Case, coherent};
+
+#[derive(Debug)]
+struct IncompleteTrace;
 
 fn check_trace<F, S>(compiled: Expr<F>, expected: &str)
 where
@@ -28,7 +31,9 @@ where
     );
     Case::deferred("control flow trace", checked).assert();
     // The harness treats matching panics as agreement.
-    assert!(completed.get(), "Rust trace must complete successfully");
+    if !completed.get() {
+        panic_any(IncompleteTrace);
+    }
 }
 
 fn check_async_trace<F, S>(compiled: Expr<F>, expected: &str)
@@ -54,7 +59,17 @@ where
         .unwrap()
         .assert();
     // The harness treats matching panics as agreement.
-    assert!(completed.get(), "Rust trace must complete successfully");
+    if !completed.get() {
+        panic_any(IncompleteTrace);
+    }
+}
+
+fn assert_incomplete_trace(result: std::thread::Result<()>) {
+    let payload = result.expect_err("trace helper must reject the case");
+    assert!(
+        payload.is::<IncompleteTrace>(),
+        "expected incomplete trace panic"
+    );
 }
 
 #[test]
@@ -460,43 +475,39 @@ fn parenthesized_returns_preserve_sync_and_async_closure_targets() {
 #[test]
 fn trace_helpers_reject_matching_panics() {
     let missing: Option<String> = None;
-    assert!(catch_unwind(|| check_trace(expr!(|| missing.unwrap()), "completed")).is_err());
+    assert_incomplete_trace(catch_unwind(|| {
+        check_trace(expr!(|| missing.unwrap()), "completed");
+    }));
 }
 
 #[test]
 fn trace_helpers_reject_an_assertion_matching_a_javascript_panic() {
     let missing: Option<String> = None;
-    assert!(
-        catch_unwind(|| {
-            check_trace(
-                expr!(|| raw!("${missing}.unwrap()", "unexpected".to_owned())),
-                "completed",
-            );
-        })
-        .is_err()
-    );
+    assert_incomplete_trace(catch_unwind(|| {
+        check_trace(
+            expr!(|| raw!("${missing}.unwrap()", "unexpected".to_owned())),
+            "completed",
+        );
+    }));
 }
 
 #[test]
 fn trace_helpers_reject_matching_async_panics() {
     let missing: Option<String> = None;
-    assert!(
-        catch_unwind(|| check_async_trace(expr!(async || missing.unwrap()), "completed")).is_err()
-    );
+    assert_incomplete_trace(catch_unwind(|| {
+        check_async_trace(expr!(async || missing.unwrap()), "completed");
+    }));
 }
 
 #[test]
 fn trace_helpers_reject_an_assertion_matching_a_javascript_rejection() {
     let missing: Option<String> = None;
-    assert!(
-        catch_unwind(|| {
-            check_async_trace(
-                expr!(async || raw!("${missing}.unwrap()", "unexpected".to_owned())),
-                "completed",
-            );
-        })
-        .is_err()
-    );
+    assert_incomplete_trace(catch_unwind(|| {
+        check_async_trace(
+            expr!(async || raw!("${missing}.unwrap()", "unexpected".to_owned())),
+            "completed",
+        );
+    }));
 }
 
 #[test]
@@ -908,4 +919,121 @@ fn async_raw_returns_preserve_automatic_semicolon_insertion() {
         };
         value
     });
+}
+
+#[test]
+fn discarded_raw_declarations_preserve_rust_and_javascript_effects() {
+    let trace = RefCell::new(Vec::<String>::new());
+    check_trace(
+        expr!(|| {
+            raw!("let trace = [];", ());
+            {
+                raw!("let value = 'let'; trace.push(value); // value", {
+                    trace.borrow_mut().push("let".to_owned());
+                })
+            };
+            if true {
+                raw!("const/* binding */value = 'const'; trace.push(value);", {
+                    trace.borrow_mut().push("const".to_owned());
+                })
+            }
+            {
+                raw!("var[value] = ['var']; trace.push(value);", {
+                    trace.borrow_mut().push("var".to_owned());
+                })
+            };
+            raw!("cx.hydrate(trace.join(','))", trace.borrow().join(","))
+        }),
+        "let,const,var",
+    );
+}
+
+#[test]
+fn sync_raw_value_tails_preserve_javascript_terminators() {
+    check_trace(
+        expr!(|| {
+            let value = { raw!("cx.hydrate('payload') // value", "payload".to_owned()) };
+            value
+        }),
+        "payload",
+    );
+    check_trace(
+        expr!(|| {
+            let value = if true {
+                raw!("cx.hydrate('payload'); // value", "payload".to_owned())
+            } else {
+                "unexpected".to_owned()
+            };
+            value
+        }),
+        "payload",
+    );
+    check_trace(
+        expr!(|| {
+            let value = loop {
+                break raw!("cx.hydrate('payload'); // value", "payload".to_owned());
+            };
+            value
+        }),
+        "payload",
+    );
+    check_trace(
+        expr!(|| {
+            let value = loop {
+                let _value = {
+                    if true {
+                        break raw!("cx.hydrate('payload'); // value", "payload".to_owned());
+                    }
+                    9.0
+                };
+            };
+            value
+        }),
+        "payload",
+    );
+    check_trace(
+        expr!(|| {
+            let _value = {
+                if true {
+                    return raw!("cx.hydrate('payload'); // value", "payload".to_owned());
+                }
+                9.0
+            };
+            "unexpected".to_owned()
+        }),
+        "payload",
+    );
+}
+
+#[test]
+fn async_raw_jump_values_preserve_javascript_terminators() {
+    check_async_trace(
+        expr!(async || loop {
+            let _value = {
+                if true {
+                    break raw!("await Promise.resolve(cx.hydrate('payload')); // value", {
+                        tokio::task::yield_now().await;
+                        "payload".to_owned()
+                    });
+                }
+                9.0
+            };
+        }),
+        "payload",
+    );
+    check_async_trace(
+        expr!(async || {
+            let _value = {
+                if true {
+                    return raw!("await Promise.resolve(cx.hydrate('payload')); // value", {
+                        tokio::task::yield_now().await;
+                        "payload".to_owned()
+                    });
+                }
+                9.0
+            };
+            "unexpected".to_owned()
+        }),
+        "payload",
+    );
 }

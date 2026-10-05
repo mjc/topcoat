@@ -2,9 +2,9 @@ use std::fmt::Write;
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
-use syn::ExprBreak;
+use syn::{Expr as SynExpr, ExprBreak};
 
-use super::{control_flow::ReturnValue, js::Js};
+use super::{builtin_macro::RawReturn, control_flow::ReturnValue, js::Js};
 use crate::expr::{Expr, NameResolver};
 
 impl Expr {
@@ -22,33 +22,39 @@ impl Expr {
             .loop_jump()
             .ok_or_else(|| syn::Error::new_spanned(expr, "break requires an enclosing loop"))?;
         let mut value = TokenStream::new();
-        if let Some(marker) = &jump.marker {
-            write!(js, "{marker}.value = (").unwrap();
-        } else if jump.value != ReturnValue::None {
-            Self::return_value(
-                expr.expr.as_deref(),
-                &mut value,
-                js,
-                names,
-                jump.value == ReturnValue::Boxed,
-            )?;
-        } else if expr.expr.is_some() {
-            js.push_str("0, ");
-        }
-        if jump.marker.is_some() || jump.value == ReturnValue::None {
-            if let Some(expr) = &expr.expr {
-                Self::dispatch(expr, &mut value, js, names)?;
-            } else if jump.marker.is_some() {
-                js.push_str("undefined");
+        if let (Some(marker), Some(SynExpr::Macro(raw))) =
+            (jump.marker.as_deref(), expr.expr.as_deref())
+        {
+            Self::expr_macro_value(raw, &mut value, js, names, RawReturn::Break(marker))?;
+        } else {
+            if let Some(marker) = &jump.marker {
+                write!(js, "{marker}.value = (").unwrap();
+            } else if jump.value != ReturnValue::None {
+                Self::return_value(
+                    expr.expr.as_deref(),
+                    &mut value,
+                    js,
+                    names,
+                    jump.value == ReturnValue::Boxed,
+                )?;
+            } else if expr.expr.is_some() {
+                js.push_str("0, ");
             }
-        }
-        if let Some(marker) = &jump.marker {
-            write!(js, "); {marker}.continuing = false; throw {marker}").unwrap();
-        } else if jump.value == ReturnValue::None {
-            if expr.expr.is_some() {
-                js.push_str("; ");
+            if jump.marker.is_some() || jump.value == ReturnValue::None {
+                if let Some(expr) = &expr.expr {
+                    Self::dispatch(expr, &mut value, js, names)?;
+                } else if jump.marker.is_some() {
+                    js.push_str("undefined");
+                }
             }
-            js.push_str("break");
+            if let Some(marker) = &jump.marker {
+                write!(js, "); {marker}.continuing = false; throw {marker}").unwrap();
+            } else if jump.value == ReturnValue::None {
+                if expr.expr.is_some() {
+                    js.push_str("; ");
+                }
+                js.push_str("break");
+            }
         }
         let token = &expr.break_token;
         quote! { #token #value }.to_tokens(rust);
