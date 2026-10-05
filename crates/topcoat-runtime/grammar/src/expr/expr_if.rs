@@ -22,11 +22,14 @@ impl Expr {
         };
         js.push_str(predicate);
         js.push_str("{ ");
-        names.control_flow.enter_value();
+        names.control_flow.enter_value(is_async);
         let rust_if = Self::expr_if_inner(if_expr, js, names, true)?;
         names.control_flow.leave_value();
+        if is_async {
+            js.push_str(" return { __proto__: null };");
+        }
         js.push_str(" }");
-        js.push_str(if is_async { ")())" } else { ")()" });
+        js.push_str(if is_async { ")()).value" } else { ")()" });
         rust_if.to_tokens(rust);
         Ok(())
     }

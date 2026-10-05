@@ -2321,6 +2321,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ress"
+version = "0.11.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d77111a94ef694bb2fe9867a93e21007e2151943c9a48b2ed72734bde41875a"
+dependencies = [
+ "log",
+ "unicode-xid",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3502,6 +3512,7 @@ version = "0.10.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "ress",
  "serde",
  "serde_json",
  "syn 3.0.6",

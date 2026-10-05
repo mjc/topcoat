@@ -40,7 +40,7 @@ impl Expr {
     ) -> syn::Result<(TokenStream, TokenStream)> {
         let is_async = ContainsAwait::in_loop(condition, body);
         if returns_value {
-            names.control_flow.enter_value();
+            names.control_flow.enter_value(is_async);
         }
         names.control_flow.enter_loop(returns_value);
         let mut loop_js = Js::default();
@@ -67,7 +67,10 @@ impl Expr {
             });
             target.declaration(js);
             js.append(loop_js);
-            js.push_str(if is_async { " })())" } else { " })()" });
+            if is_async {
+                js.push_str(" return { __proto__: null };");
+            }
+            js.push_str(if is_async { " })()).value" } else { " })()" });
         } else if target.escapes {
             js.push_str("{ ");
             target.declaration(js);

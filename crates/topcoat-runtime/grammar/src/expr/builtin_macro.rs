@@ -26,6 +26,17 @@ impl Expr {
         BuiltinMacro::parse(&expr.mac)?.lower(rust, js, names)
     }
 
+    pub(super) fn expr_macro_return(
+        expr: &ExprMacro,
+        rust: &mut TokenStream,
+        js: &mut Js,
+        names: &mut NameResolver,
+    ) -> syn::Result<()> {
+        match BuiltinMacro::parse(&expr.mac)? {
+            BuiltinMacro::Raw(raw) => raw.lower(rust, js, names, true),
+        }
+    }
+
     pub(super) fn stmt_macro_expr(
         expr: &ExprMacro,
         rust: &mut TokenStream,
@@ -39,7 +50,7 @@ impl Expr {
                 if raw.has_expression_source() {
                     js.push_str("0, ");
                 }
-                raw.lower(rust, js, names)
+                raw.lower(rust, js, names, false)
             }
         }
     }
@@ -90,7 +101,7 @@ impl BuiltinMacro {
         names: &mut NameResolver,
     ) -> syn::Result<()> {
         match self {
-            Self::Raw(raw) => raw.lower(rust, js, names),
+            Self::Raw(raw) => raw.lower(rust, js, names, false),
         }
     }
 }
@@ -157,8 +168,27 @@ impl RawMacro {
         rust: &mut TokenStream,
         js: &mut Js,
         names: &mut NameResolver,
+        returning: bool,
     ) -> syn::Result<()> {
-        self.interpolate_js(js, names)?;
+        let source = self.js.value();
+        if returning {
+            js.push_str("return { __proto__: null, value: (");
+            let end = if let Some(value) = self.return_source(&source)? {
+                js.push_str("(\n");
+                self.interpolate_js(value, js, names)?;
+                js.push_str("\n)");
+                value.len()
+            } else {
+                js.push_str("undefined");
+                0
+            };
+            js.push_str(") };\n");
+            // Keep unreachable declarations and captures in the original scope.
+            self.interpolate_js(&source[end..], js, names)?;
+            js.push('\n');
+        } else {
+            self.interpolate_js(&source, js, names)?;
+        }
 
         match &self.rust {
             Some(rust_expr) => {
@@ -187,9 +217,52 @@ impl RawMacro {
         Ok(())
     }
 
-    fn interpolate_js(&self, js: &mut Js, names: &mut NameResolver) -> syn::Result<()> {
-        let input = self.js.value();
-        let mut rest = input.as_str();
+    /// The source consumed by a return, excluding its JavaScript terminator.
+    fn return_source<'a>(&self, source: &'a str) -> syn::Result<Option<&'a str>> {
+        let mut depth = 0usize;
+        let mut started = false;
+        for item in ress::Scanner::new(source) {
+            let item = item.map_err(|error| syn::Error::new(self.js.span(), error.to_string()))?;
+            let token = item.token;
+            if token.is_comment() || token.is_eof() {
+                continue;
+            }
+            if !started {
+                // A line terminator before the value ends a JavaScript return.
+                if token.matches_punct_str(";")
+                    || source[..item.span.start].contains(['\n', '\r', '\u{2028}', '\u{2029}'])
+                {
+                    return Ok(None);
+                }
+                started = true;
+            }
+            if token.matches_punct_str(";") && depth == 0 {
+                return Ok(Some(&source[..item.span.start]));
+            }
+            if (token.is_template_head() && !token.is_template_no_sub())
+                || token.matches_punct_str("(")
+                || token.matches_punct_str("[")
+                || token.matches_punct_str("{")
+            {
+                depth += 1;
+            } else if (token.is_template_tail() && !token.is_template_no_sub())
+                || token.matches_punct_str(")")
+                || token.matches_punct_str("]")
+                || token.matches_punct_str("}")
+            {
+                depth = depth.saturating_sub(1);
+            }
+        }
+        Ok(started.then_some(source))
+    }
+
+    fn interpolate_js(
+        &self,
+        input: &str,
+        js: &mut Js,
+        names: &mut NameResolver,
+    ) -> syn::Result<()> {
+        let mut rest = input;
 
         while let Some(start) = rest.find("${") {
             js.push_str(&rest[..start]);

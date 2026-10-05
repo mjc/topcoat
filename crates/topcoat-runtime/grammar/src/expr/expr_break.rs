@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::ExprBreak;
 
-use super::js::Js;
+use super::{control_flow::ReturnValue, js::Js};
 use crate::expr::{Expr, NameResolver};
 
 impl Expr {
@@ -22,19 +22,27 @@ impl Expr {
         let mut value = TokenStream::new();
         if let Some(marker) = &jump.marker {
             js.push_str(&format!("{marker}.value = ("));
-        } else if jump.returns_value {
-            js.push_str("return ");
+        } else if jump.value != ReturnValue::None {
+            Self::return_value(
+                expr.expr.as_deref(),
+                &mut value,
+                js,
+                names,
+                jump.value == ReturnValue::Boxed,
+            )?;
         } else if expr.expr.is_some() {
             js.push_str("0, ");
         }
-        if let Some(expr) = &expr.expr {
-            Self::dispatch(expr, &mut value, js, names)?;
-        } else if jump.marker.is_some() || jump.returns_value {
-            js.push_str("undefined");
+        if jump.marker.is_some() || jump.value == ReturnValue::None {
+            if let Some(expr) = &expr.expr {
+                Self::dispatch(expr, &mut value, js, names)?;
+            } else if jump.marker.is_some() {
+                js.push_str("undefined");
+            }
         }
         if let Some(marker) = &jump.marker {
             js.push_str(&format!("); {marker}.continuing = false; throw {marker}"));
-        } else if !jump.returns_value {
+        } else if jump.value == ReturnValue::None {
             if expr.expr.is_some() {
                 js.push_str("; ");
             }

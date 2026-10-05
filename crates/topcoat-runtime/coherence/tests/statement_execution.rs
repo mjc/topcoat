@@ -712,3 +712,161 @@ fn returns_leave_awaited_while_value_expressions() {
         "returned",
     );
 }
+
+#[test]
+fn async_value_wrappers_leave_returned_futures_unpolled() {
+    let failure = Awaitable::<f64>::panicking("unused future").after_yield();
+    check_async_trace(
+        expr!(async || {
+            let _future = {
+                raw!("${failure}", {
+                    tokio::task::yield_now().await;
+                    failure.clone()
+                })
+            };
+            "completed".to_owned()
+        }),
+        "completed",
+    );
+    let failure = Awaitable::<f64>::panicking("unused future").after_yield();
+    check_async_trace(
+        expr!(async || {
+            let _future = if true {
+                raw!("${failure}", {
+                    tokio::task::yield_now().await;
+                    failure.clone()
+                })
+            } else {
+                raw!("${failure}", failure.clone())
+            };
+            "completed".to_owned()
+        }),
+        "completed",
+    );
+    let failure = Awaitable::<f64>::panicking("unused future").after_yield();
+    check_async_trace(
+        expr!(async || {
+            let _future = loop {
+                break raw!("${failure}", {
+                    tokio::task::yield_now().await;
+                    failure.clone()
+                });
+            };
+            "completed".to_owned()
+        }),
+        "completed",
+    );
+    let failure = Awaitable::<f64>::panicking("unused future").after_yield();
+    check_async_trace(
+        expr!(async || {
+            let _future = loop {
+                let _value = if true {
+                    break raw!("${failure}", {
+                        tokio::task::yield_now().await;
+                        failure.clone()
+                    });
+                } else {
+                    9.0
+                };
+            };
+            "completed".to_owned()
+        }),
+        "completed",
+    );
+}
+
+#[test]
+fn boxed_future_payloads_can_be_awaited_by_the_caller() {
+    let ready = Awaitable::ready("payload".to_owned()).after_yield();
+    check_async_trace(
+        expr!(async || {
+            let future = loop {
+                let _value = if true {
+                    break raw!("${ready}", {
+                        tokio::task::yield_now().await;
+                        ready.clone()
+                    });
+                } else {
+                    9.0
+                };
+            };
+            future.await
+        }),
+        "payload",
+    );
+}
+
+#[test]
+fn async_value_wrappers_preserve_unit_fallthrough() {
+    coherent!(async => { let value = { raw!("await Promise.resolve()", tokio::task::yield_now().await); }; value });
+    coherent!(async => { let value = if false { raw!("await Promise.resolve()", tokio::task::yield_now().await); }; value });
+    coherent!(async => { let value = while false { raw!("await Promise.resolve()", tokio::task::yield_now().await); }; value });
+    coherent!(async => { let value = { raw!("await Promise.resolve();", tokio::task::yield_now().await); raw!("/* unit */;", ()) }; value });
+}
+
+#[test]
+fn async_raw_value_tails_preserve_javascript_terminators() {
+    check_async_trace(
+        expr!(async || {
+            let value = {
+                raw!("await Promise.resolve(cx.hydrate('payload'));", {
+                    tokio::task::yield_now().await;
+                    "payload".to_owned()
+                })
+            };
+            value
+        }),
+        "payload",
+    );
+    check_async_trace(
+        expr!(async || {
+            let value = if true {
+                raw!("await Promise.resolve(cx.hydrate('payload')); // value", {
+                    tokio::task::yield_now().await;
+                    "payload".to_owned()
+                })
+            } else {
+                "unexpected".to_owned()
+            };
+            value
+        }),
+        "payload",
+    );
+    check_async_trace(
+        expr!(async || {
+            let value = loop {
+                break raw!(
+                    "await Promise.resolve(cx.hydrate('payload')); /* value */",
+                    {
+                        tokio::task::yield_now().await;
+                        "payload".to_owned()
+                    }
+                );
+            };
+            value
+        }),
+        "payload",
+    );
+}
+
+#[test]
+fn async_raw_value_tails_preserve_comma_expressions() {
+    let ready = Awaitable::ready(0.0);
+    check_async_trace(
+        expr!(async || {
+            let value = {
+                ready.await;
+                raw!("cx.hydrate(0), cx.hydrate('payload')", "payload".to_owned())
+            };
+            value
+        }),
+        "payload",
+    );
+}
+
+#[test]
+fn async_raw_returns_preserve_automatic_semicolon_insertion() {
+    coherent!(async => { let value = { raw!("Promise.resolve()", Awaitable::ready(())).await; raw!("// value\ncx.hydrate(7)", ()) }; value });
+    coherent!(async => { let value = { raw!("Promise.resolve()", Awaitable::ready(())).await; raw!("/* value\n */ cx.hydrate(7)", ()) }; value });
+    coherent!(async => { let value = { raw!("Promise.resolve()", Awaitable::ready(())).await; raw!("\ncx.hydrate(7)", ()) }; value });
+}

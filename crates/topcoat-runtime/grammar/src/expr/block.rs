@@ -24,6 +24,9 @@ impl Expr {
         }
 
         names.pop_scope();
+        if returns_value && names.control_flow.boxes_value() {
+            js.push_str("; return { __proto__: null }; ");
+        }
         js.push_str(" }");
         quote! { { #stmts } }.to_tokens(rust);
         Ok(())

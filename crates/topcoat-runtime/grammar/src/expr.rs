@@ -162,7 +162,7 @@ impl Expr {
                 } else {
                     "(() => { "
                 });
-                names.control_flow.enter_value();
+                names.control_flow.enter_value(is_async);
                 Self::stmt_expr(expr, rust, js, names)?;
                 names.control_flow.leave_value();
                 js.push_str(if is_async { "; })())" } else { "; })()" });

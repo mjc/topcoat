@@ -356,3 +356,51 @@ fn jump_catchers_rethrow_foreign_objects_unchanged() {
         check(&mut engine, &source, 5.0, asynchronous);
     }
 }
+
+#[test]
+fn jump_markers_do_not_inherit_property_setters() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    check(
+        &mut engine,
+        "|| { raw!(\"Object.defineProperty(Object.prototype, 'value', { set(value) {} });\", ()); if true { return 7.0; } else { 9.0 } }",
+        7.0,
+        false,
+    );
+    check(
+        &mut engine,
+        "|| { raw!(\"Object.defineProperty(Object.prototype, 'continuing', { set(value) {} }); let step = 0;\", ()); while raw!(\"cx.hydrate(step++ < 2)\", false) { let _value = if raw!(\"cx.hydrate(step === 1)\", false) { continue; } else { 9.0 }; } raw!(\"cx.hydrate(step)\", 3.0) }",
+        3.0,
+        false,
+    );
+}
+
+#[test]
+fn async_value_wrappers_do_not_inherit_then_hooks() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    check(
+        &mut engine,
+        "async || { raw!(\"Object.defineProperty(Array.prototype, 'then', { get() { throw new Error('inherited then'); } });\", ()); let value = { raw!(\"await Promise.resolve(cx.hydrate(7))\", { tokio::task::yield_now().await; 7.0 }) }; value }",
+        7.0,
+        true,
+    );
+}
+
+#[test]
+fn async_raw_value_returns_preserve_tokens_and_termination() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    for value in [
+        "cx.hydrate(0), cx.hydrate('payload'); /* value /* nested opener */",
+        "cx.hydrate(0), cx.hydrate('payload'); // value\n",
+        "cx.hydrate('payload'); throw new Error('unreachable');",
+        "cx.hydrate((() => { const value = 'payload'; return value; })());",
+        "cx.hydrate((function* () { yield 'payload'; })().next().value);",
+        "cx.hydrate(/[;]/.test(';') ? 'payload' : 'unexpected');",
+        "cx.hydrate(`payload`);",
+        "cx.hydrate(new (class { #value = 'payload'; get() { return this.#value; } })().get());",
+    ] {
+        let source = format!(
+            "async || {{ let value = {{ raw!(\"Promise.resolve()\", Awaitable::ready(())).await; raw!({value:?}, String::new()) }}; value }}"
+        );
+        check(&mut engine, &source, "payload".to_owned(), true);
+    }
+}

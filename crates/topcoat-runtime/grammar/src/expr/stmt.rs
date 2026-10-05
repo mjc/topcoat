@@ -44,13 +44,15 @@ impl Expr {
                 // it becomes the JavaScript `return`.
                 let is_tail_value = is_tail && semi.is_none();
                 let returns = is_tail_value && !Self::is_statement_only(expr);
-                if returns {
-                    js.push_str("return ");
-                }
-
                 let mut value = TokenStream::new();
                 if returns {
-                    Self::dispatch(expr, &mut value, js, names)?;
+                    Self::return_value(
+                        Some(expr),
+                        &mut value,
+                        js,
+                        names,
+                        names.control_flow.boxes_value(),
+                    )?;
                 } else {
                     Self::stmt_expr(expr, &mut value, js, names)?;
                 }
@@ -69,6 +71,38 @@ impl Expr {
                 return Err(syn::Error::new_spanned(other, "unsupported statement"));
             }
         }
+        Ok(())
+    }
+
+    /// Returns a value without letting an async wrapper await it implicitly.
+    pub(super) fn return_value(
+        expr: Option<&SynExpr>,
+        rust: &mut TokenStream,
+        js: &mut Js,
+        names: &mut NameResolver,
+        boxed: bool,
+    ) -> syn::Result<()> {
+        if !boxed {
+            js.push_str("return ");
+            if let Some(expr) = expr {
+                Self::dispatch(expr, rust, js, names)?;
+            } else {
+                js.push_str("undefined");
+            }
+            return Ok(());
+        }
+
+        if let Some(SynExpr::Macro(raw)) = expr {
+            return Self::expr_macro_return(raw, rust, js, names);
+        }
+
+        // A null prototype keeps Promise resolution from finding an inherited then.
+        js.push_str("return { __proto__: null, value: (");
+        match expr {
+            Some(expr) => Self::dispatch(expr, rust, js, names)?,
+            None => js.push_str("undefined"),
+        }
+        js.push_str(") }");
         Ok(())
     }
 

@@ -4,6 +4,7 @@ use super::js::Js;
 #[derive(Default)]
 pub(super) struct ControlFlow {
     depth: usize,
+    boxed_values: Vec<bool>,
     next_target: usize,
     functions: Vec<Target>,
     loops: Vec<Target>,
@@ -11,7 +12,7 @@ pub(super) struct ControlFlow {
 
 impl ControlFlow {
     pub(super) fn enter_function(&mut self, root: bool) {
-        self.enter_value();
+        self.enter_value(false);
         let target = self.target(false, root);
         self.functions.push(target);
     }
@@ -21,12 +22,18 @@ impl ControlFlow {
         self.functions.pop().expect("active function")
     }
 
-    pub(super) fn enter_value(&mut self) {
+    pub(super) fn enter_value(&mut self, boxed: bool) {
         self.depth += 1;
+        self.boxed_values.push(boxed);
     }
 
     pub(super) fn leave_value(&mut self) {
         self.depth -= 1;
+        self.boxed_values.pop();
+    }
+
+    pub(super) fn boxes_value(&self) -> bool {
+        self.boxed_values.last().copied().unwrap_or(false)
     }
 
     pub(super) fn enter_loop(&mut self, returns_value: bool) {
@@ -60,7 +67,13 @@ impl ControlFlow {
             marker,
             depth: self.depth,
             loop_start: self.loops.len(),
-            returns_value,
+            value: if !returns_value {
+                ReturnValue::None
+            } else if self.boxes_value() {
+                ReturnValue::Boxed
+            } else {
+                ReturnValue::Direct
+            },
             root,
             escapes: false,
         }
@@ -71,7 +84,7 @@ pub(super) struct Target {
     marker: String,
     depth: usize,
     loop_start: usize,
-    returns_value: bool,
+    value: ReturnValue,
     root: bool,
     pub(super) escapes: bool,
 }
@@ -86,7 +99,7 @@ impl Target {
         };
         Jump {
             marker,
-            returns_value: self.returns_value,
+            value: self.value,
             root: self.root,
         }
     }
@@ -94,7 +107,7 @@ impl Target {
     pub(super) fn declaration(&self, js: &mut Js) {
         if self.escapes {
             // Catch only this invocation's marker; runtime failures pass through.
-            js.push_str(&format!("const {} = {{}}; ", self.marker));
+            js.push_str(&format!("const {} = {{ __proto__: null }}; ", self.marker));
         }
     }
 
@@ -130,10 +143,18 @@ impl Target {
             " catch (__jump) {{ if (__jump === {}) {{ if ({}.continuing) continue; ",
             self.marker, self.marker,
         ));
-        if self.returns_value {
-            js.push_str(&format!("return {}.value; ", self.marker));
-        } else {
+        if self.value == ReturnValue::None {
             js.push_str("break; ");
+        } else {
+            js.push_str("return ");
+            if self.value == ReturnValue::Boxed {
+                js.push_str("{ __proto__: null, value: ");
+            }
+            js.push_str(&format!("{}.value", self.marker));
+            if self.value == ReturnValue::Boxed {
+                js.push('}');
+            }
+            js.push_str("; ");
         }
         js.push_str("} throw __jump; } }");
     }
@@ -141,6 +162,13 @@ impl Target {
 
 pub(super) struct Jump {
     pub(super) marker: Option<String>,
-    pub(super) returns_value: bool,
+    pub(super) value: ReturnValue,
     pub(super) root: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReturnValue {
+    None,
+    Direct,
+    Boxed,
 }
