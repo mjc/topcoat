@@ -26,8 +26,8 @@ where
         },
         js,
     );
-    Case::deferred("statement trace", checked).assert();
-    // Matching panics must not hide a failed Rust trace assertion.
+    Case::deferred("control flow trace", checked).assert();
+    // The harness treats matching panics as agreement.
     assert!(completed.get(), "Rust trace must complete successfully");
 }
 
@@ -50,10 +50,10 @@ where
         },
         js,
     );
-    Case::asynchronous("async statement trace", checked)
+    Case::asynchronous("async control flow trace", checked)
         .unwrap()
         .assert();
-    // Matching panics must not hide a failed Rust trace assertion.
+    // The harness treats matching panics as agreement.
     assert!(completed.get(), "Rust trace must complete successfully");
 }
 
@@ -798,10 +798,31 @@ fn boxed_future_payloads_can_be_awaited_by_the_caller() {
 
 #[test]
 fn async_value_wrappers_preserve_unit_fallthrough() {
-    coherent!(async => { let value = { raw!("await Promise.resolve()", tokio::task::yield_now().await); }; value });
-    coherent!(async => { let value = if false { raw!("await Promise.resolve()", tokio::task::yield_now().await); }; value });
-    coherent!(async => { let value = while false { raw!("await Promise.resolve()", tokio::task::yield_now().await); }; value });
-    coherent!(async => { let value = { raw!("await Promise.resolve();", tokio::task::yield_now().await); raw!("/* unit */;", ()) }; value });
+    coherent!(async => {
+        let value = {
+            raw!("await Promise.resolve()", tokio::task::yield_now().await);
+        };
+        value
+    });
+    coherent!(async => {
+        let value = if false {
+            raw!("await Promise.resolve()", tokio::task::yield_now().await);
+        };
+        value
+    });
+    coherent!(async => {
+        let value = while false {
+            raw!("await Promise.resolve()", tokio::task::yield_now().await);
+        };
+        value
+    });
+    coherent!(async => {
+        let value = {
+            raw!("await Promise.resolve();", tokio::task::yield_now().await);
+            raw!("/* unit */;", ())
+        };
+        value
+    });
 }
 
 #[test]
@@ -866,7 +887,25 @@ fn async_raw_value_tails_preserve_comma_expressions() {
 
 #[test]
 fn async_raw_returns_preserve_automatic_semicolon_insertion() {
-    coherent!(async => { let value = { raw!("Promise.resolve()", Awaitable::ready(())).await; raw!("// value\ncx.hydrate(7)", ()) }; value });
-    coherent!(async => { let value = { raw!("Promise.resolve()", Awaitable::ready(())).await; raw!("/* value\n */ cx.hydrate(7)", ()) }; value });
-    coherent!(async => { let value = { raw!("Promise.resolve()", Awaitable::ready(())).await; raw!("\ncx.hydrate(7)", ()) }; value });
+    coherent!(async => {
+        let value = {
+            raw!("Promise.resolve()", Awaitable::ready(())).await;
+            raw!("// value\ncx.hydrate(7)", ())
+        };
+        value
+    });
+    coherent!(async => {
+        let value = {
+            raw!("Promise.resolve()", Awaitable::ready(())).await;
+            raw!("/* value\n */ cx.hydrate(7)", ())
+        };
+        value
+    });
+    coherent!(async => {
+        let value = {
+            raw!("Promise.resolve()", Awaitable::ready(())).await;
+            raw!("\ncx.hydrate(7)", ())
+        };
+        value
+    });
 }

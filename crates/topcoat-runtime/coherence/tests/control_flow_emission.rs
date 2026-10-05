@@ -11,7 +11,7 @@ struct Source {
 
 impl<'ast> Visit<'ast> for Source {
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        // Visit the builder receiver first to preserve source-part order.
+        // Visit the receiver first to preserve source order.
         syn::visit::visit_expr_method_call(self, call);
         if call.method == "source" {
             let SynExpr::Lit(literal) = &call.args[0] else {
@@ -56,6 +56,31 @@ fn check(engine: &mut Engine, source: &str, expected: impl Observe, asynchronous
         "{source}\n{}",
         emitted.javascript
     );
+}
+
+fn iteration_trace(jump: &str, at: usize, following: bool) -> String {
+    let mut trace = Vec::new();
+    for step in 1..=4 {
+        trace.push(format!("visit:{step}"));
+        trace.push(format!("check:{step}"));
+        if step == at {
+            trace.push(format!("{jump}:{step}"));
+            match jump {
+                "return" => return trace.join(","),
+                "break" => {
+                    trace.push(format!("done:{step}"));
+                    return trace.join(",");
+                }
+                "continue" => continue,
+                _ => unreachable!(),
+            }
+        }
+        if following {
+            trace.push(format!("after:{step}"));
+        }
+    }
+    trace.push("done:5".to_owned());
+    trace.join(",")
 }
 
 #[test]
@@ -118,36 +143,8 @@ fn jumps_preserve_iteration_traces() {
                                  raw!(\"trace.push('done:' + step);\", ());
                                  raw!(\"cx.hydrate(trace.join(','))\", String::new()) }}"
                                 );
-                                let mut trace = Vec::new();
-                                let mut step = 0;
-                                let mut returned = false;
-                                while step < 4 {
-                                    step += 1;
-                                    trace.push(format!("visit:{step}"));
-                                    trace.push(format!("check:{step}"));
-                                    if step == at {
-                                        trace.push(format!("{jump}:{step}"));
-                                        match jump {
-                                            "break" => break,
-                                            "continue" => continue,
-                                            "return" => {
-                                                returned = true;
-                                                break;
-                                            }
-                                            _ => unreachable!(),
-                                        }
-                                    }
-                                    if following {
-                                        trace.push(format!("after:{step}"));
-                                    }
-                                }
-                                if !returned {
-                                    if step == 4 && !(jump == "break" && at == 4) {
-                                        step += 1;
-                                    }
-                                    trace.push(format!("done:{step}"));
-                                }
-                                check(&mut engine, &source, trace.join(","), asynchronous);
+                                let expected = iteration_trace(jump, at, following);
+                                check(&mut engine, &source, expected, asynchronous);
                             }
                         }
                     }
@@ -263,34 +260,8 @@ fn value_position_jumps_preserve_iteration_traces() {
                         let source = format!(
                             "{prefix}|| {{ raw!(\"let step = 0; let trace = [];\", ()); {loop_source}; raw!(\"trace.push('done:' + step);\", ()); raw!(\"cx.hydrate(trace.join(','))\", String::new()) }}"
                         );
-                        let mut trace = Vec::new();
-                        let mut step = 0;
-                        let mut returned = false;
-                        while step < 4 {
-                            step += 1;
-                            trace.push(format!("visit:{step}"));
-                            trace.push(format!("check:{step}"));
-                            if step == at {
-                                trace.push(format!("{jump}:{step}"));
-                                match jump {
-                                    "break" => break,
-                                    "continue" => continue,
-                                    "return" => {
-                                        returned = true;
-                                        break;
-                                    }
-                                    _ => unreachable!(),
-                                }
-                            }
-                            trace.push(format!("after:{step}"));
-                        }
-                        if !returned {
-                            if step == 4 && !(jump == "break" && at == 4) {
-                                step += 1;
-                            }
-                            trace.push(format!("done:{step}"));
-                        }
-                        check(&mut engine, &source, trace.join(","), asynchronous);
+                        let expected = iteration_trace(jump, at, true);
+                        check(&mut engine, &source, expected, asynchronous);
                     }
                 }
             }

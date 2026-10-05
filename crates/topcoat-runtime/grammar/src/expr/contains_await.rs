@@ -7,6 +7,7 @@ use syn::{
 pub(super) struct ContainsAwait {
     found: bool,
 }
+
 impl ContainsAwait {
     pub(super) fn in_expr(expr: &SynExpr) -> bool {
         let mut visitor = Self::default();

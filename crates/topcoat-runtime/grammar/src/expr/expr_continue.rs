@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use proc_macro2::TokenStream;
 use quote::ToTokens;
 use syn::ExprContinue;
@@ -20,7 +22,7 @@ impl Expr {
             .loop_jump()
             .ok_or_else(|| syn::Error::new_spanned(expr, "continue requires an enclosing loop"))?;
         if let Some(marker) = jump.marker {
-            js.push_str(&format!("{marker}.continuing = true; throw {marker}"));
+            write!(js, "{marker}.continuing = true; throw {marker}").unwrap();
         } else {
             js.push_str("continue");
         }

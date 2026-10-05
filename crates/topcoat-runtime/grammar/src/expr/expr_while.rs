@@ -13,10 +13,10 @@ impl Expr {
         js: &mut Js,
         names: &mut NameResolver,
     ) -> syn::Result<()> {
-        Self::while_expr(expr, rust, js, names, true)
+        Self::expr_while_inner(expr, rust, js, names, true)
     }
 
-    pub(super) fn while_expr(
+    pub(super) fn expr_while_inner(
         expr: &ExprWhile,
         rust: &mut TokenStream,
         js: &mut Js,

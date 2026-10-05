@@ -86,8 +86,7 @@ fn conditional_break_preserves_the_loop() {
 
 #[test]
 fn conditional_continue_skips_the_rest_of_the_iteration() {
-    // raw! supplies the same bounded counter in each language without adding
-    // assignment syntax to the expression grammar.
+    // Assignment expressions are unsupported, so raw! implements the loop counter.
     let step = std::cell::Cell::new(0.0);
     coherent!({
         raw!("let step = 0;", step.set(0.0));
@@ -293,8 +292,15 @@ fn loop_break_payloads_use_the_shared_vocabulary() {
         };
         value * 3.0
     });
-    coherent!(direct => loop { break 7.0; });
-    coherent!(direct => { let value = loop { break "value"; }; value });
+    coherent!(direct => loop {
+        break 7.0;
+    });
+    coherent!(direct => {
+        let value = loop {
+            break "value";
+        };
+        value
+    });
 }
 
 #[test]
@@ -431,8 +437,20 @@ fn ordinary_panics_propagate_through_jump_catchers() {
 
 #[test]
 fn returns_in_direct_expressions_leave_evaluation() {
-    coherent!(direct => { let value = if true { return 7.0; } else { 9.0 }; value + 1.0 });
-    coherent!(direct => { if true { return 7.0; } 9.0 });
+    coherent!(direct => {
+        let value = if true {
+            return 7.0;
+        } else {
+            9.0
+        };
+        value + 1.0
+    });
+    coherent!(direct => {
+        if true {
+            return 7.0;
+        }
+        9.0
+    });
 }
 
 #[test]

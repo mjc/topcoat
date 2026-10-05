@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::ExprBreak;
@@ -21,7 +23,7 @@ impl Expr {
             .ok_or_else(|| syn::Error::new_spanned(expr, "break requires an enclosing loop"))?;
         let mut value = TokenStream::new();
         if let Some(marker) = &jump.marker {
-            js.push_str(&format!("{marker}.value = ("));
+            write!(js, "{marker}.value = (").unwrap();
         } else if jump.value != ReturnValue::None {
             Self::return_value(
                 expr.expr.as_deref(),
@@ -41,7 +43,7 @@ impl Expr {
             }
         }
         if let Some(marker) = &jump.marker {
-            js.push_str(&format!("); {marker}.continuing = false; throw {marker}"));
+            write!(js, "); {marker}.continuing = false; throw {marker}").unwrap();
         } else if jump.value == ReturnValue::None {
             if expr.expr.is_some() {
                 js.push_str("; ");

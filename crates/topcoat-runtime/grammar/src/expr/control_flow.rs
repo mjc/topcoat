@@ -1,9 +1,10 @@
+use std::fmt::Write;
+
 use super::js::Js;
 
 /// Tracks Rust jump targets across generated JavaScript functions.
 #[derive(Default)]
 pub(super) struct ControlFlow {
-    depth: usize,
     boxed_values: Vec<bool>,
     next_target: usize,
     functions: Vec<Target>,
@@ -23,12 +24,10 @@ impl ControlFlow {
     }
 
     pub(super) fn enter_value(&mut self, boxed: bool) {
-        self.depth += 1;
         self.boxed_values.push(boxed);
     }
 
     pub(super) fn leave_value(&mut self) {
-        self.depth -= 1;
         self.boxed_values.pop();
     }
 
@@ -50,14 +49,14 @@ impl ControlFlow {
         if self.loops.len() <= start {
             return None;
         }
-        Some(self.loops.last_mut()?.jump(self.depth))
+        Some(self.loops.last_mut()?.jump(self.boxed_values.len()))
     }
 
     pub(super) fn return_jump(&mut self) -> Jump {
         self.functions
             .last_mut()
             .expect("active function")
-            .jump(self.depth)
+            .jump(self.boxed_values.len())
     }
 
     fn target(&mut self, returns_value: bool, root: bool) -> Target {
@@ -65,7 +64,7 @@ impl ControlFlow {
         self.next_target += 1;
         Target {
             marker,
-            depth: self.depth,
+            depth: self.boxed_values.len(),
             loop_start: self.loops.len(),
             value: if !returns_value {
                 ReturnValue::None
@@ -106,8 +105,8 @@ impl Target {
 
     pub(super) fn declaration(&self, js: &mut Js) {
         if self.escapes {
-            // Catch only this invocation's marker; runtime failures pass through.
-            js.push_str(&format!("const {} = {{ __proto__: null }}; ", self.marker));
+            // A null prototype avoids inherited property setters.
+            write!(js, "const {} = {{ __proto__: null }}; ", self.marker).unwrap();
         }
     }
 
@@ -126,10 +125,12 @@ impl Target {
             js.append(body);
             js.push_str("); }");
         }
-        js.push_str(&format!(
+        write!(
+            js,
             " catch (__jump) {{ if (__jump === {}) return {}.value; throw __jump; }} }}",
             self.marker, self.marker,
-        ));
+        )
+        .unwrap();
     }
 
     pub(super) fn loop_body(&self, body: Js, js: &mut Js) {
@@ -139,10 +140,12 @@ impl Target {
         }
         js.push_str("{ try ");
         js.append(body);
-        js.push_str(&format!(
+        write!(
+            js,
             " catch (__jump) {{ if (__jump === {}) {{ if ({}.continuing) continue; ",
             self.marker, self.marker,
-        ));
+        )
+        .unwrap();
         if self.value == ReturnValue::None {
             js.push_str("break; ");
         } else {
@@ -150,7 +153,7 @@ impl Target {
             if self.value == ReturnValue::Boxed {
                 js.push_str("{ __proto__: null, value: ");
             }
-            js.push_str(&format!("{}.value", self.marker));
+            write!(js, "{}.value", self.marker).unwrap();
             if self.value == ReturnValue::Boxed {
                 js.push('}');
             }

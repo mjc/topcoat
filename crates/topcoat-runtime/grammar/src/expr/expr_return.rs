@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::ExprReturn;
@@ -16,7 +18,7 @@ impl Expr {
         let jump = names.control_flow.return_jump();
         let mut value = TokenStream::new();
         if let Some(marker) = &jump.marker {
-            js.push_str(&format!("{marker}.value = ("));
+            write!(js, "{marker}.value = (").unwrap();
         } else {
             js.push_str("return ");
         }
@@ -27,7 +29,7 @@ impl Expr {
             quote! { () }.to_tokens(&mut value);
         }
         if let Some(marker) = &jump.marker {
-            js.push_str(&format!("); throw {marker}"));
+            write!(js, "); throw {marker}").unwrap();
         }
         let token = &expr.return_token;
         if jump.root {

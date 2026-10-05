@@ -74,7 +74,7 @@ impl Expr {
         Ok(())
     }
 
-    /// Returns a value without letting an async wrapper await it implicitly.
+    /// Emits a return, boxing values returned by async wrappers.
     pub(super) fn return_value(
         expr: Option<&SynExpr>,
         rust: &mut TokenStream,
@@ -96,7 +96,7 @@ impl Expr {
             return Self::expr_macro_return(raw, rust, js, names);
         }
 
-        // A null prototype keeps Promise resolution from finding an inherited then.
+        // Promise resolution checks for an inherited `then` property.
         js.push_str("return { __proto__: null, value: (");
         match expr {
             Some(expr) => Self::dispatch(expr, rust, js, names)?,
@@ -106,8 +106,7 @@ impl Expr {
         Ok(())
     }
 
-    /// Emits statement blocks and conditionals in the enclosing function so
-    /// their jumps still target the surrounding loop or closure.
+    /// Lowers a statement expression, keeping jumps in the enclosing scope.
     pub(super) fn stmt_expr(
         expr: &SynExpr,
         rust: &mut TokenStream,
@@ -120,8 +119,8 @@ impl Expr {
             }
             SynExpr::Block(inner) => Self::block(&inner.block, rust, js, names, false)?,
             SynExpr::Macro(inner) => Self::stmt_macro_expr(inner, rust, js, names)?,
-            SynExpr::Loop(inner) => Self::loop_expr(inner, rust, js, names, false)?,
-            SynExpr::While(inner) => Self::while_expr(inner, rust, js, names, false)?,
+            SynExpr::Loop(inner) => Self::expr_loop_inner(inner, rust, js, names, false)?,
+            SynExpr::While(inner) => Self::expr_while_inner(inner, rust, js, names, false)?,
             SynExpr::Break(inner) => Self::expr_break(inner, rust, js, names)?,
             SynExpr::Continue(inner) => Self::expr_continue(inner, rust, js, names)?,
             SynExpr::Return(inner) => Self::expr_return(inner, rust, js, names)?,

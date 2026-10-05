@@ -12,10 +12,10 @@ impl Expr {
         js: &mut Js,
         names: &mut NameResolver,
     ) -> syn::Result<()> {
-        Self::loop_expr(expr, rust, js, names, true)
+        Self::expr_loop_inner(expr, rust, js, names, true)
     }
 
-    pub(super) fn loop_expr(
+    pub(super) fn expr_loop_inner(
         expr: &ExprLoop,
         rust: &mut TokenStream,
         js: &mut Js,
