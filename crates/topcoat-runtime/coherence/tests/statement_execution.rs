@@ -1,6 +1,7 @@
 use std::{
     cell::{Cell, RefCell},
     ops::AsyncFnOnce,
+    panic::catch_unwind,
 };
 
 use topcoat::runtime::{Expr, Surrogate, Surrogated, expr};
@@ -12,17 +13,22 @@ where
     S: Surrogate<Real = String>,
 {
     let (run, js) = compiled.into_evaluated_and_js();
+    let completed = Cell::new(false);
     let checked = Expr::evaluate(
         || {
+            let completed = &completed;
             move || {
                 let actual = run().into_real();
                 assert_eq!(actual, expected);
+                completed.set(true);
                 actual.into_surrogate()
             }
         },
         js,
     );
     Case::deferred("statement trace", checked).assert();
+    // Matching panics must not hide a failed Rust trace assertion.
+    assert!(completed.get(), "Rust trace must complete successfully");
 }
 
 fn check_async_trace<F, S>(compiled: Expr<F>, expected: &str)
@@ -31,11 +37,14 @@ where
     S: Surrogate<Real = String>,
 {
     let (run, js) = compiled.into_evaluated_and_js();
+    let completed = Cell::new(false);
     let checked = Expr::evaluate(
         || {
+            let completed = &completed;
             async move || {
                 let actual = run().await.into_real();
                 assert_eq!(actual, expected);
+                completed.set(true);
                 actual.into_surrogate()
             }
         },
@@ -44,6 +53,8 @@ where
     Case::asynchronous("async statement trace", checked)
         .unwrap()
         .assert();
+    // Matching panics must not hide a failed Rust trace assertion.
+    assert!(completed.get(), "Rust trace must complete successfully");
 }
 
 #[test]
@@ -444,4 +455,46 @@ fn parenthesized_statement_forms_preserve_the_loop_target() {
 fn parenthesized_returns_preserve_sync_and_async_closure_targets() {
     coherent!({ (return 7.0) });
     coherent!(async => { (((return 7.0))) });
+}
+
+#[test]
+fn trace_helpers_reject_matching_panics() {
+    let missing: Option<String> = None;
+    assert!(catch_unwind(|| check_trace(expr!(|| missing.unwrap()), "completed")).is_err());
+}
+
+#[test]
+fn trace_helpers_reject_an_assertion_matching_a_javascript_panic() {
+    let missing: Option<String> = None;
+    assert!(
+        catch_unwind(|| {
+            check_trace(
+                expr!(|| raw!("${missing}.unwrap()", "unexpected".to_owned())),
+                "completed",
+            );
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn trace_helpers_reject_matching_async_panics() {
+    let missing: Option<String> = None;
+    assert!(
+        catch_unwind(|| check_async_trace(expr!(async || missing.unwrap()), "completed")).is_err()
+    );
+}
+
+#[test]
+fn trace_helpers_reject_an_assertion_matching_a_javascript_rejection() {
+    let missing: Option<String> = None;
+    assert!(
+        catch_unwind(|| {
+            check_async_trace(
+                expr!(async || raw!("${missing}.unwrap()", "unexpected".to_owned())),
+                "completed",
+            );
+        })
+        .is_err()
+    );
 }
