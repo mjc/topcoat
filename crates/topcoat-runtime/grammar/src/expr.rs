@@ -1,6 +1,7 @@
 mod block;
 mod builtin_macro;
 mod contains_await;
+mod control_flow;
 mod expr_await;
 mod expr_binary;
 mod expr_block;
@@ -91,7 +92,16 @@ impl Expr {
         let mut rust = TokenStream::new();
         let mut js = Js::default();
         let mut names = NameResolver::default();
+        names.control_flow.enter_function(true);
         Self::dispatch(&self.inner, &mut rust, &mut js, &mut names)?;
+        let target = names.control_flow.leave_function();
+        if target.escapes {
+            let body = js;
+            js = Js::default();
+            js.push_str("(() => ");
+            target.function_body(body, &mut js, false);
+            js.push_str(")()");
+        }
 
         if !matches!(self.inner, syn::Expr::Closure(..)) {
             rust = quote! { #topcoat_runtime::Surrogate::into_real(#rust) }
@@ -145,9 +155,18 @@ impl Expr {
             syn::Expr::If(inner) => Self::expr_if(inner, rust, js, names)?,
             syn::Expr::Loop(inner) => Self::expr_loop(inner, rust, js, names)?,
             syn::Expr::While(inner) => Self::expr_while(inner, rust, js, names)?,
-            syn::Expr::Continue(inner) => Self::expr_continue(inner, rust, js, names)?,
-            syn::Expr::Break(inner) => Self::expr_break(inner, rust, js, names)?,
-            syn::Expr::Return(inner) => Self::expr_return(inner, rust, js, names)?,
+            syn::Expr::Continue(_) | syn::Expr::Break(_) | syn::Expr::Return(_) => {
+                let is_async = contains_await::ContainsAwait::in_expr(expr);
+                js.push_str(if is_async {
+                    "(await (async () => { "
+                } else {
+                    "(() => { "
+                });
+                names.control_flow.enter_value();
+                Self::stmt_expr(expr, rust, js, names)?;
+                names.control_flow.leave_value();
+                js.push_str(if is_async { "; })())" } else { "; })()" });
+            }
             syn::Expr::Path(inner) => Self::expr_path(inner, rust, js, names)?,
             syn::Expr::Macro(inner) => Self::expr_macro(inner, rust, js, names)?,
             other => return Err(syn::Error::new_spanned(other, "unsupported expression")),

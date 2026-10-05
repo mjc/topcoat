@@ -216,3 +216,143 @@ fn nested_parenthesized_statements_preserve_jump_targets() {
         }
     }
 }
+
+#[test]
+fn value_position_jumps_preserve_iteration_traces() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    for asynchronous in [false, true] {
+        for loop_kind in ["while", "loop"] {
+            for jump in ["break", "continue", "return"] {
+                for at in [1, 2, 4, 5] {
+                    for form in 0..4 {
+                        let condition = if asynchronous {
+                            format!(
+                                "raw!(\"Promise.resolve(cx.hydrate((trace.push('check:' + step), step === {at})))\", true).await"
+                            )
+                        } else {
+                            format!(
+                                "raw!(\"cx.hydrate((trace.push('check:' + step), step === {at}))\", true)"
+                            )
+                        };
+                        let action = if jump == "return" {
+                            "return raw!(\"cx.hydrate(trace.concat('return:' + step).join(','))\", String::new())".to_owned()
+                        } else {
+                            format!("raw!(\"trace.push('{jump}:' + step);\", ()); {jump}")
+                        };
+                        let expression = match form {
+                            0 => format!("if {condition} {{ {action}; }} else {{ 9.0 }}"),
+                            1 => format!("{{ if {condition} {{ {action}; }} 9.0 }}"),
+                            2 => format!("(({{ {{ if {condition} {{ {action}; }} 9.0 }} }}))"),
+                            _ => format!(
+                                "(if false {{ 11.0 }} else if {condition} {{ {action}; }} else {{ 9.0 }})"
+                            ),
+                        };
+                        let contents = format!(
+                            "raw!(\"trace.push('visit:' + step);\", ()); let _value = {expression}; raw!(\"trace.push('after:' + step);\", ());"
+                        );
+                        let loop_source = if loop_kind == "while" {
+                            format!(
+                                "while raw!(\"cx.hydrate(step++ < 4)\", false) {{ {contents} }}"
+                            )
+                        } else {
+                            format!(
+                                "loop {{ if raw!(\"cx.hydrate(step++ >= 4)\", false) {{ break; }} {contents} }}"
+                            )
+                        };
+                        let prefix = if asynchronous { "async " } else { "" };
+                        let source = format!(
+                            "{prefix}|| {{ raw!(\"let step = 0; let trace = [];\", ()); {loop_source}; raw!(\"trace.push('done:' + step);\", ()); raw!(\"cx.hydrate(trace.join(','))\", String::new()) }}"
+                        );
+                        let mut trace = Vec::new();
+                        let mut step = 0;
+                        let mut returned = false;
+                        while step < 4 {
+                            step += 1;
+                            trace.push(format!("visit:{step}"));
+                            trace.push(format!("check:{step}"));
+                            if step == at {
+                                trace.push(format!("{jump}:{step}"));
+                                match jump {
+                                    "break" => break,
+                                    "continue" => continue,
+                                    "return" => {
+                                        returned = true;
+                                        break;
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }
+                            trace.push(format!("after:{step}"));
+                        }
+                        if !returned {
+                            if step == 4 && !(jump == "break" && at == 4) {
+                                step += 1;
+                            }
+                            trace.push(format!("done:{step}"));
+                        }
+                        check(&mut engine, &source, trace.join(","), asynchronous);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_closure_jumps_remain_local_to_each_invocation() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    for source in [
+        "|| { let callback = || { let value = if true { return 7.0; } else { 9.0 }; value + 1.0 }; raw!(\"${callback}().add(${callback}())\", 14.0) }",
+        "|| { let callback = || loop { let _value = if true { break 7.0; } else { 9.0 }; }; raw!(\"${callback}().add(${callback}())\", 14.0) }",
+        "|| { let outer = || loop { let callback = || { let _value = if true { return 5.0; } else { 9.0 }; 11.0 }; break raw!(\"${callback}().add(cx.hydrate(2.0))\", 7.0); }; raw!(\"${outer}().add(${outer}())\", 14.0) }",
+    ] {
+        check(&mut engine, source, 14.0, false);
+    }
+    check(
+        &mut engine,
+        "async || { let callback = async || { let _value = if raw!(\"Promise.resolve(cx.hydrate(true))\", true).await { return 7.0; } else { 9.0 }; 11.0 }; raw!(\"(await ${callback}()).add(await ${callback}())\", 14.0) }",
+        14.0,
+        true,
+    );
+}
+
+#[test]
+fn jump_markers_are_private_to_async_invocations() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    check(
+        &mut engine,
+        "async || { let callback = async |value| { let _value = if raw!(\"Promise.resolve(cx.hydrate(true))\", true).await { return value; } else { 9.0 }; 11.0 }; raw!(\"(await Promise.all([${callback}(cx.hydrate(5.0)), ${callback}(cx.hydrate(7.0))])).reduce((sum, value) => sum.add(value), cx.hydrate(0.0))\", 12.0) }",
+        12.0,
+        true,
+    );
+}
+
+#[test]
+fn jump_catchers_rethrow_foreign_objects_unchanged() {
+    let mut engine = Engine::new(Duration::from_secs(5));
+    for asynchronous in [false, true] {
+        let prefix = if asynchronous { "async " } else { "" };
+        let call = if asynchronous {
+            "await ${callback}()"
+        } else {
+            "${callback}()"
+        };
+        let error_source = if asynchronous {
+            "Promise.reject(sentinel)"
+        } else {
+            "(() => { throw sentinel; })()"
+        };
+        let error = format!(
+            "raw!({error_source:?}, 9.0){}",
+            if asynchronous { ".await" } else { "" }
+        );
+        let caller = format!(
+            "{}({prefix}() => {{ try {{ {call}; return cx.hydrate(11.0); }} catch (error) {{ return cx.hydrate(error === sentinel && !inspected ? 5.0 : 9.0); }} }})()",
+            if asynchronous { "await " } else { "" }
+        );
+        let source = format!(
+            "{prefix}|| {{ raw!(\"let inspected = false; let sentinel = {{ get value() {{ inspected = true; throw new Error('inspected'); }} }};\", ()); let callback = {prefix}|| {{ let value = if false {{ return 7.0; }} else {{ {error} }}; value }}; raw!({caller:?}, 5.0) }}"
+        );
+        check(&mut engine, &source, 5.0, asynchronous);
+    }
+}

@@ -15,6 +15,7 @@ impl Expr {
         js: &mut Js,
         names: &mut NameResolver,
     ) -> syn::Result<()> {
+        names.control_flow.enter_function(false);
         let asyncness = &closure.asyncness;
         if asyncness.is_some() {
             js.push_str("async ");
@@ -35,17 +36,24 @@ impl Expr {
         js.push_str(") => ");
 
         let mut body = TokenStream::new();
+        let mut body_js = Js::default();
         match &*closure.body {
             // A block body maps directly onto the arrow function body without
             // the IIFE wrapper that a block expression would need.
-            SynExpr::Block(block) => Self::block(&block.block, &mut body, js, names, true)?,
-            other if Self::is_statement_only(other) => {
-                js.push_str("{ ");
-                Self::stmt_expr(other, &mut body, js, names)?;
-                js.push_str("; }");
+            SynExpr::Block(block) => {
+                Self::block(&block.block, &mut body, &mut body_js, names, true)?;
             }
-            other => Self::dispatch(other, &mut body, js, names)?,
+            other if Self::is_statement_only(other) => {
+                body_js.push_str("{ ");
+                Self::stmt_expr(other, &mut body, &mut body_js, names)?;
+                body_js.push_str("; }");
+            }
+            other => Self::dispatch(other, &mut body, &mut body_js, names)?,
         }
+        let is_block =
+            matches!(&*closure.body, SynExpr::Block(_)) || Self::is_statement_only(&closure.body);
+        let target = names.control_flow.leave_function();
+        target.function_body(body_js, js, is_block);
         names.pop_scope();
 
         let output = &closure.output;

@@ -54,6 +54,16 @@ impl Expr {
     }
 }
 
+pub(super) fn contains_await(mac: &Macro) -> bool {
+    if let Ok(BuiltinMacro::Raw(raw)) = BuiltinMacro::parse(mac) {
+        raw.rust
+            .as_ref()
+            .is_some_and(super::contains_await::ContainsAwait::in_expr)
+    } else {
+        false
+    }
+}
+
 enum BuiltinMacro {
     Raw(RawMacro),
 }

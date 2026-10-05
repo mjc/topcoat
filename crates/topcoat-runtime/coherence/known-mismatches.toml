@@ -15,21 +15,3 @@ id = "some_unit"
 reason = "The JavaScript option uses undefined for both None and a unit payload."
 rust = { kind = "Return", value = { type = "Bool", value = true } }
 javascript = { kind = "Return", value = { type = "Bool", value = false } }
-
-[[mismatch]]
-id = "loop_break_value"
-reason = "JavaScript loop breaks do not preserve their payload."
-rust = { kind = "Return", value = { type = "String", value = "loop value" } }
-javascript = { kind = "Return", value = { type = "Unit" } }
-
-[[mismatch]]
-id = "return_in_value_conditional"
-reason = "Value-producing conditionals wrap return in a separate function."
-rust = { kind = "Return", value = { type = "F64", value = "401c000000000000" } }
-javascript = { kind = "Return", value = { type = "F64", value = "4020000000000000" } }
-
-[[mismatch]]
-id = "break_in_value_conditional"
-reason = "Value-producing conditionals separate break from its loop."
-rust = { kind = "Return", value = { type = "F64", value = "401c000000000000" } }
-javascript = { kind = "CompileError", value = "SyntaxError: Illegal break statement" }

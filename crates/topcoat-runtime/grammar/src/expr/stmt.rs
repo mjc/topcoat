@@ -86,13 +86,20 @@ impl Expr {
             }
             SynExpr::Block(inner) => Self::block(&inner.block, rust, js, names, false)?,
             SynExpr::Macro(inner) => Self::stmt_macro_expr(inner, rust, js, names)?,
+            SynExpr::Loop(inner) => Self::loop_expr(inner, rust, js, names, false)?,
+            SynExpr::While(inner) => Self::while_expr(inner, rust, js, names, false)?,
+            SynExpr::Break(inner) => Self::expr_break(inner, rust, js, names)?,
+            SynExpr::Continue(inner) => Self::expr_continue(inner, rust, js, names)?,
+            SynExpr::Return(inner) => Self::expr_return(inner, rust, js, names)?,
             SynExpr::Paren(inner) => {
                 let mut unwrapped = inner.expr.as_ref();
                 while let SynExpr::Paren(paren) = unwrapped {
                     unwrapped = paren.expr.as_ref();
                 }
-                if matches!(unwrapped, SynExpr::If(_) | SynExpr::Block(_))
-                    || Self::is_statement_only(unwrapped)
+                if matches!(
+                    unwrapped,
+                    SynExpr::If(_) | SynExpr::Block(_) | SynExpr::Loop(_) | SynExpr::While(_)
+                ) || Self::is_statement_only(unwrapped)
                 {
                     let mut nested = TokenStream::new();
                     Self::stmt_expr(&inner.expr, &mut nested, js, names)?;
@@ -110,11 +117,7 @@ impl Expr {
     pub(super) fn is_statement_only(expr: &SynExpr) -> bool {
         match expr {
             SynExpr::Paren(inner) => Self::is_statement_only(&inner.expr),
-            SynExpr::Break(_)
-            | SynExpr::Continue(_)
-            | SynExpr::Return(_)
-            | SynExpr::Loop(_)
-            | SynExpr::While(_) => true,
+            SynExpr::Break(_) | SynExpr::Continue(_) | SynExpr::Return(_) => true,
             _ => false,
         }
     }

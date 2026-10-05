@@ -10,12 +10,20 @@ impl Expr {
         expr: &ExprContinue,
         rust: &mut TokenStream,
         js: &mut Js,
-        _names: &mut NameResolver,
+        names: &mut NameResolver,
     ) -> syn::Result<()> {
         if let Some(label) = &expr.label {
             return Err(syn::Error::new_spanned(label, "labels are not supported"));
         }
-        js.push_str("continue");
+        let jump = names
+            .control_flow
+            .loop_jump()
+            .ok_or_else(|| syn::Error::new_spanned(expr, "continue requires an enclosing loop"))?;
+        if let Some(marker) = jump.marker {
+            js.push_str(&format!("{marker}.continuing = true; throw {marker}"));
+        } else {
+            js.push_str("continue");
+        }
         expr.to_tokens(rust);
         Ok(())
     }

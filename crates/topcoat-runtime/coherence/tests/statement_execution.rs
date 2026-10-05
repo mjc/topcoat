@@ -498,3 +498,217 @@ fn trace_helpers_reject_an_assertion_matching_a_javascript_rejection() {
         .is_err()
     );
 }
+
+#[test]
+fn value_position_continue_preserves_iteration_traces() {
+    for at in [1, 2, 4, 5] {
+        let step = Cell::new(0.0);
+        let trace = RefCell::new(Vec::<String>::new());
+        let expected = (1..=4)
+            .filter(|&step| step != at)
+            .map(|step| step.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let at = f64::from(at);
+        check_trace(
+            expr!(|| {
+                raw!("let step = 0; let trace = [];", ());
+                while raw!("cx.hydrate(step++ < 4)", {
+                    let current = step.get();
+                    step.set(current + 1.0);
+                    current < 4.0
+                }) {
+                    let _value = {
+                        if raw!("cx.hydrate(step)", step.get()) == at {
+                            continue;
+                        }
+                        9.0
+                    };
+                    raw!(
+                        "trace.push(String(step));",
+                        trace.borrow_mut().push(step.get().to_string())
+                    );
+                }
+                raw!("cx.hydrate(trace.join(','))", trace.borrow().join(","))
+            }),
+            &expected,
+        );
+    }
+}
+
+#[test]
+fn break_payloads_evaluate_once_before_leaving_the_loop() {
+    let trace = RefCell::new(Vec::<String>::new());
+    check_trace(
+        expr!(|| {
+            raw!("let trace = [];", ());
+            let value = loop {
+                let _value = if true {
+                    break raw!("trace.push('payload'), cx.hydrate('value')", {
+                        trace.borrow_mut().push("payload".into());
+                        "value".to_owned()
+                    });
+                } else {
+                    9.0
+                };
+            };
+            raw!(
+                "cx.hydrate(trace.join(',') + ',' + ${value}.dehydrate())",
+                format!("{},{}", trace.borrow().join(","), value)
+            )
+        }),
+        "payload,value",
+    );
+    let trace = RefCell::new(Vec::<String>::new());
+    check_trace(
+        expr!(|| {
+            raw!("let trace = [];", ());
+            let _value = if true {
+                return raw!("trace.push('return'), cx.hydrate(trace.join(','))", {
+                    trace.borrow_mut().push("return".into());
+                    trace.borrow().join(",")
+                });
+            } else {
+                9.0
+            };
+            "unexpected".to_owned()
+        }),
+        "return",
+    );
+}
+
+#[test]
+fn async_value_position_jumps_keep_their_targets() {
+    let value = Awaitable::ready("payload".to_owned()).after_yield();
+    check_async_trace(
+        expr!(async || {
+            let result = loop {
+                let _value = if true {
+                    break value.await;
+                } else {
+                    9.0
+                };
+            };
+            result
+        }),
+        "payload",
+    );
+    let value = Awaitable::ready("returned".to_owned()).after_yield();
+    check_async_trace(
+        expr!(async || {
+            let _result = loop {
+                let _value = if true {
+                    return value.await;
+                } else {
+                    9.0
+                };
+                break 9.0;
+            };
+            "unexpected".to_owned()
+        }),
+        "returned",
+    );
+    let step = Cell::new(0.0);
+    let trace = RefCell::new(Vec::<String>::new());
+    check_async_trace(
+        expr!(async || {
+            raw!("let step = 0; let trace = [];", ());
+            let result = loop {
+                raw!("step++;", step.set(step.get() + 1.0));
+                let _value = if raw!("cx.hydrate(step)", step.get()) < 3.0 {
+                    if raw!(
+                        "Promise.resolve(cx.hydrate(true))",
+                        Awaitable::ready(true).after_yield()
+                    )
+                    .await
+                    {
+                        continue;
+                    }
+                    9.0
+                } else {
+                    11.0
+                };
+                raw!(
+                    "trace.push(String(step));",
+                    trace.borrow_mut().push(step.get().to_string())
+                );
+                break raw!("cx.hydrate(trace.join(','))", trace.borrow().join(","));
+            };
+            result
+        }),
+        "3",
+    );
+}
+
+#[test]
+#[expect(
+    clippy::diverging_sub_expression,
+    reason = "The test exercises jumps as initializer expressions."
+)]
+fn awaited_diverging_initializers_preserve_payloads() {
+    let value = Awaitable::ready("break".to_owned()).after_yield();
+    check_async_trace(
+        expr!(async || loop {
+            let _value = break value.await;
+        }),
+        "break",
+    );
+    let value = Awaitable::ready("return".to_owned()).after_yield();
+    check_async_trace(
+        expr!(async || {
+            let _value = return value.await;
+        }),
+        "return",
+    );
+}
+
+#[test]
+fn raw_fallback_awaits_keep_value_wrappers_async() {
+    check_async_trace(
+        expr!(async || {
+            let value = loop {
+                break raw!("await Promise.resolve(cx.hydrate('payload'))", {
+                    tokio::task::yield_now().await;
+                    "payload".to_owned()
+                });
+            };
+            value
+        }),
+        "payload",
+    );
+    check_async_trace(
+        expr!(async || {
+            let value = {
+                raw!("await Promise.resolve(cx.hydrate('block'))", {
+                    tokio::task::yield_now().await;
+                    "block".to_owned()
+                })
+            };
+            value
+        }),
+        "block",
+    );
+}
+
+#[test]
+fn returns_leave_awaited_while_value_expressions() {
+    let value = Awaitable::ready("returned".to_owned()).after_yield();
+    check_async_trace(
+        expr!(async || {
+            let _value = while raw!(
+                "Promise.resolve(cx.hydrate(true))",
+                Awaitable::ready(true).after_yield()
+            )
+            .await
+            {
+                let _selected = if true {
+                    return value.await;
+                } else {
+                    9.0
+                };
+            };
+            "unexpected".to_owned()
+        }),
+        "returned",
+    );
+}

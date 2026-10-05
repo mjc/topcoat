@@ -81,6 +81,8 @@ Expressions use a subset of Rust's syntax:
 - Closures, optionally `async`, and `.await`.
 - `loop`, `while`, `break`, `continue`, and `return`.
 
+Jumps inside blocks and conditionals target the enclosing loop or closure, including when the block or conditional computes a value. A `loop` expression returns the value carried by `break`. Nested loops and closures have separate jump targets. Labels are not supported.
+
 Unsupported syntax produces a compile error at the expression.
 
 # Embedding JavaScript
