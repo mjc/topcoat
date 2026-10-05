@@ -65,7 +65,7 @@ fn jumps_preserve_iteration_traces() {
         for loop_kind in ["while", "loop"] {
             for jump in ["break", "continue", "return"] {
                 for at in [1, 2, 4, 5] {
-                    for branch in 0..6 {
+                    for branch in 0..8 {
                         for semicolon in ["", ";"] {
                             let condition = format!(
                                 "raw!(\"cx.hydrate((trace.push('check:' + step), step === {at}))\", true)"
@@ -76,14 +76,21 @@ fn jumps_preserve_iteration_traces() {
                                 format!("raw!(\"trace.push('{jump}:' + step);\", ()); {jump}")
                             };
                             let body = format!("{{ {action}{semicolon} }}");
-                            let branch_semicolon = if branch == 5 { ";" } else { semicolon };
+                            let branch_semicolon = if branch >= 5 { ";" } else { semicolon };
                             let branch = match branch {
                                 0 => format!("if {condition} {body}"),
                                 1 => format!("if !{condition} {{}} else {body}"),
                                 2 => format!("if false {{}} else if {condition} {body} else {{}}"),
                                 3 => format!("if {condition} {{ if true {body} }}"),
                                 4 => format!("{{ if {condition} {body} }}"),
-                                5 => format!("(if {condition} {body})"),
+                                5..=7 => {
+                                    let depth = [1, 2, 4][branch - 5];
+                                    format!(
+                                        "{}if {condition} {body}{}",
+                                        "(".repeat(depth),
+                                        ")".repeat(depth)
+                                    )
+                                }
                                 _ => unreachable!(),
                             };
                             for following in [false, true] {
@@ -184,24 +191,24 @@ fn parenthesized_tail_jumps_and_loops_execute() {
 }
 
 #[test]
-fn nested_parenthesized_statements_execute() {
+fn nested_parenthesized_statements_preserve_jump_targets() {
     let mut engine = Engine::new(Duration::from_secs(5));
     for asynchronous in [false, true] {
         let prefix = if asynchronous { "async " } else { "" };
         for depth in [1, 2, 4] {
             for (statement, expected) in [
-                ("raw!(\"function () {}\", ())", 9.0),
-                ("raw!(\"{ first: 7, second: 9 }\", ())", 9.0),
+                ("raw!(\"function () {}\", ())", 5.0),
+                ("raw!(\"{ first: 7, second: 9 }\", ())", 5.0),
                 ("if true { break; }", 9.0),
                 ("{ break; }", 9.0),
-                ("while false {}", 9.0),
-                ("loop { break; }", 9.0),
+                ("while false {}", 5.0),
+                ("loop { break; }", 5.0),
                 ("return 7.0", 7.0),
             ] {
                 let statement = format!("{}{statement}{}", "(".repeat(depth), ")".repeat(depth));
                 check(
                     &mut engine,
-                    &format!("{prefix}|| {{ loop {{ {statement}; break; }} 9.0 }}"),
+                    &format!("{prefix}|| {{ loop {{ {statement}; return 5.0; }} 9.0 }}"),
                     expected,
                     asynchronous,
                 );
