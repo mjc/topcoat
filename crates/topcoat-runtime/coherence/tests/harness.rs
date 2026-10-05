@@ -95,19 +95,18 @@ fn missing_baseline_is_an_error() {
 
 #[test]
 fn known_baselines_reject_exceptions_and_unobservable_values() {
-    for (value, source, expected) in [
-        (3.0, "cx.hydrate(3)", "now passes"),
+    for (source, expected) in [
+        ("cx.hydrate(true)", "now passes"),
         (
-            3.0,
             "(() => { throw new SyntaxError('Illegal break statement'); })()",
             "changed",
         ),
-        (2.5, "(() => { break; })()", "changed"),
-        (3.0, "({ unexpected: true })", "Unsupported coherence value"),
+        ("(() => { break; })()", "changed"),
+        ("({ unexpected: true })", "Unsupported coherence value"),
     ] {
         let case = Case::evaluated(
             "changed failure",
-            Expr::evaluate(|| value, Js::source(source)),
+            Expr::evaluate(|| true, Js::source(source)),
         );
         let report = format!("{:#}", case.check_known("some_unit").unwrap_err());
         assert!(report.contains(expected));

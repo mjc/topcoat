@@ -121,7 +121,12 @@ impl RawMacro {
         let mut rest = source.as_str();
         loop {
             rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
-            if let Some(comment) = rest.strip_prefix("//") {
+            // The browser's Function constructor accepts legacy HTML comments.
+            if let Some(comment) = rest
+                .strip_prefix("//")
+                .or_else(|| rest.strip_prefix("<!--"))
+                .or_else(|| rest.strip_prefix("-->"))
+            {
                 let end = comment
                     .find(['\n', '\r', '\u{2028}', '\u{2029}'])
                     .unwrap_or(comment.len());

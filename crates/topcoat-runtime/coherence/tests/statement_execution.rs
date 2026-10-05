@@ -357,6 +357,40 @@ fn discarded_block_tail_raw_expressions_keep_expression_syntax() {
 }
 
 #[test]
+fn discarded_raw_tails_recognize_html_comments() {
+    coherent!({
+        {
+            raw!("<!-- opening\n", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("\n--> closing\n", ())
+        };
+        7.0
+    });
+    coherent!(async => {
+        {
+            raw!("<!-- opening\r\n/* middle */\n--> closing\u{2028}", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("<!-- opening\nfunction () {}", ())
+        };
+        7.0
+    });
+    coherent!({
+        {
+            raw!("\n--> closing\n{ answer: 7, extra: 9 }", ())
+        };
+        7.0
+    });
+}
+
+#[test]
 fn discarded_raw_tails_preserve_precedence_and_side_effects() {
     let trace = RefCell::new(Vec::<String>::new());
     check_trace(
