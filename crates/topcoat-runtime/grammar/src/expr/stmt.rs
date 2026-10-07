@@ -3,10 +3,7 @@ use quote::{ToTokens, quote};
 use syn::Stmt;
 
 use super::js::Js;
-use crate::expr::{
-    Expr,
-    name_resolver::{LocalBindingKind, NameResolver},
-};
+use crate::expr::{Expr, name_resolver::NameResolver};
 
 impl Expr {
     pub(super) fn stmt(
@@ -35,7 +32,8 @@ impl Expr {
                 let mut value = TokenStream::new();
                 Self::dispatch(&init.expr, &mut value, js, names)?;
                 js.push_str("; ");
-                names.bind_local(&ident, name, LocalBindingKind::Surrogate)?;
+                let kind = names.binding_kind(&init.expr);
+                names.bind_local(&ident, name, kind)?;
 
                 quote! { let #pat = #value; }.to_tokens(rust);
             }

@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{Expr as SynExpr, ExprClosure};
+use topcoat_core_grammar::paths::topcoat_runtime;
 
 use super::js::Js;
 use crate::expr::{
@@ -16,6 +17,7 @@ impl Expr {
         names: &mut NameResolver,
     ) -> syn::Result<()> {
         let asyncness = &closure.asyncness;
+        let nested = names.has_local_scope();
         if asyncness.is_some() {
             js.push_str("async ");
         }
@@ -29,7 +31,19 @@ impl Expr {
             }
             let mut tokens = TokenStream::new();
             let (ident, name) = Self::pat(input, &mut tokens, js, names)?;
-            names.bind_local(&ident, name, LocalBindingKind::Plain)?;
+            if let syn::Pat::Type(input) = input {
+                let pat = &input.pat;
+                let ty = &input.ty;
+                tokens = quote! { #pat: <#ty as #topcoat_runtime::Surrogated>::Surrogate };
+            }
+            // Top-level handlers receive facade events, which raw! can borrow
+            // directly. Typed local closure parameters use vocabulary values.
+            let kind = if nested && matches!(input, syn::Pat::Type(_)) {
+                LocalBindingKind::Surrogate
+            } else {
+                LocalBindingKind::Plain
+            };
+            names.bind_local(&ident, name, kind)?;
             inputs.push(tokens);
         }
         js.push_str(") => ");
@@ -43,7 +57,12 @@ impl Expr {
         }
         names.pop_scope();
 
-        let output = &closure.output;
+        let output = match &closure.output {
+            syn::ReturnType::Default => TokenStream::new(),
+            syn::ReturnType::Type(arrow, ty) => {
+                quote! { #arrow <#ty as #topcoat_runtime::Surrogated>::Surrogate }
+            }
+        };
         quote! { #asyncness move |#(#inputs),*| #output #body }.to_tokens(rust);
         Ok(())
     }
