@@ -1,5 +1,5 @@
 use topcoat::runtime::expr;
-use topcoat_runtime_coherence::{Case, coherent};
+use topcoat_runtime_coherence::{Awaitable, Case, coherent};
 
 #[test]
 fn local_closure_calls_preserve_arguments() {
@@ -107,4 +107,29 @@ fn local_closures_preserve_scope_and_call_semantics() {
         (inner, outer())
     });
     coherent!((|first, second| (first, second))(1, 2));
+}
+
+#[test]
+fn nested_async_closures_preserve_arguments_after_suspension() {
+    let ready = Awaitable::ready("sentinel".to_owned()).after_yield();
+    coherent!(async => {
+        let run = async |first, second| {
+            let identity = |value| value;
+            (identity(first), second.await)
+        };
+        run("first".to_owned(), ready).await
+    });
+}
+
+#[test]
+fn unawaited_local_async_closures_do_not_run() {
+    let runs = &std::cell::Cell::new(0.0);
+    coherent!(async => {
+        raw!("globalThis.closureRuns = 0;", ());
+        let work = async || {
+            raw!("globalThis.closureRuns += 1;", runs.set(runs.get() + 1.0));
+        };
+        let _pending = work();
+        raw!("cx.hydrate(globalThis.closureRuns)", runs.get())
+    });
 }

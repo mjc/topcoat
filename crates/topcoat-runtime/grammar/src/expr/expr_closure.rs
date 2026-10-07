@@ -18,7 +18,8 @@ impl Expr {
     ) -> syn::Result<()> {
         let asyncness = &closure.asyncness;
         let nested = names.has_local_scope();
-        if asyncness.is_some() {
+        let deferred = asyncness.is_some() && nested;
+        if asyncness.is_some() && !deferred {
             js.push_str("async ");
         }
 
@@ -47,6 +48,9 @@ impl Expr {
             inputs.push(tokens);
         }
         js.push_str(") => ");
+        if deferred {
+            js.push_str("cx.future(async () => ");
+        }
 
         let mut body = TokenStream::new();
         match &*closure.body {
@@ -54,6 +58,9 @@ impl Expr {
             // the IIFE wrapper that a block expression would need.
             SynExpr::Block(block) => Self::block(&block.block, &mut body, js, names)?,
             other => Self::dispatch(other, &mut body, js, names)?,
+        }
+        if deferred {
+            js.push(')');
         }
         names.pop_scope();
 
