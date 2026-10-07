@@ -32,7 +32,7 @@ fn check(engine: &mut Engine, source: &str, expected: impl Observe, asynchronous
     let expansion = syn::parse2(expression.expr_to_tokens().unwrap()).unwrap();
     let mut emitted = Source::default();
     emitted.visit_expr(&expansion);
-    assert!(!emitted.javascript.is_empty());
+    assert_ne!(emitted.javascript, "");
     let javascript = serde_json::to_string(&emitted.javascript).unwrap();
     let call = if asynchronous {
         format!("TopcoatCoherence.executeAsync({javascript})")
