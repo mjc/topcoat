@@ -9,6 +9,7 @@ pub(super) enum ResolvedIdent {
     External { rust_ident: Ident },
 }
 
+#[derive(Clone)]
 struct LocalBinding {
     js_name: String,
     rust_ident: Ident,
@@ -19,6 +20,17 @@ struct LocalBinding {
 pub(super) enum LocalBindingKind {
     Plain,
     Surrogate,
+    Closure,
+}
+
+impl LocalBindingKind {
+    pub(super) fn for_expr(expr: &syn::Expr, names: &NameResolver) -> Self {
+        if names.is_closure(expr) {
+            Self::Closure
+        } else {
+            Self::Surrogate
+        }
+    }
 }
 
 pub(super) struct ExternalBinding {
@@ -119,6 +131,60 @@ impl NameResolver {
             }
         }
         false
+    }
+
+    pub(super) fn has_local_scope(&self) -> bool {
+        !self.scopes.is_empty()
+    }
+
+    pub(super) fn is_closure(&self, expr: &syn::Expr) -> bool {
+        match expr {
+            syn::Expr::Closure(_) => true,
+            syn::Expr::Path(path) => path.path.get_ident().is_some_and(|ident| {
+                let original = ident.to_string();
+                self.scopes
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(&original))
+                    .is_some_and(|binding| binding.kind == LocalBindingKind::Closure)
+            }),
+            syn::Expr::Paren(paren) => self.is_closure(&paren.expr),
+            syn::Expr::If(expr) => {
+                self.block_is_closure(&expr.then_branch)
+                    && expr
+                        .else_branch
+                        .as_ref()
+                        .is_some_and(|(_, expr)| self.is_closure(expr))
+            }
+            syn::Expr::Block(expr) => self.block_is_closure(&expr.block),
+            _ => false,
+        }
+    }
+
+    fn block_is_closure(&self, block: &syn::Block) -> bool {
+        let mut names = Self {
+            scopes: self.scopes.clone(),
+            ..Self::default()
+        };
+        names.push_scope();
+        for stmt in &block.stmts {
+            if let syn::Stmt::Local(local) = stmt {
+                let pat = match &local.pat {
+                    syn::Pat::Type(pat) => &*pat.pat,
+                    pat => pat,
+                };
+                if let syn::Pat::Ident(pat) = pat {
+                    let kind = local
+                        .init
+                        .as_ref()
+                        .map_or(LocalBindingKind::Surrogate, |init| {
+                            LocalBindingKind::for_expr(&init.expr, &names)
+                        });
+                    names.bind_local(&pat.ident, String::new(), kind).unwrap();
+                }
+            }
+        }
+        matches!(block.stmts.last(), Some(syn::Stmt::Expr(expr, None)) if names.is_closure(expr))
     }
 
     pub(super) fn externals(&self) -> &[ExternalBinding] {

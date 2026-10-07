@@ -83,6 +83,19 @@ Expressions use a subset of Rust's syntax:
 
 Unsupported syntax produces a compile error at the expression.
 
+Closures defined inside an expression can be called with ordinary function syntax. Parameter and return annotations use types from the shared vocabulary:
+
+```rust
+# use topcoat::runtime::expr;
+let label = expr!({
+    let second = |_first: String, second: String| -> String { second };
+    second("first".to_owned(), "selected".to_owned())
+});
+# assert_eq!(label.into_evaluated_and_js().0, "selected");
+```
+
+Local closure aliases preserve the closure's scope. Local async closures return a future whose body runs when awaited. Event handlers run when the browser dispatches their event.
+
 # Embedding JavaScript
 
 Use `raw!` for JavaScript operations outside the supported vocabulary. Its first argument is JavaScript source. The optional second argument is equivalent Rust for server evaluation:
