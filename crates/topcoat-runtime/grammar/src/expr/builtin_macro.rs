@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Write};
 
 use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, quote};
@@ -26,6 +26,36 @@ impl Expr {
         BuiltinMacro::parse(&expr.mac)?.lower(rust, js, names)
     }
 
+    pub(super) fn expr_macro_value(
+        expr: &ExprMacro,
+        rust: &mut TokenStream,
+        js: &mut Js,
+        names: &mut NameResolver,
+        returning: RawReturn<'_>,
+    ) -> syn::Result<()> {
+        match BuiltinMacro::parse(&expr.mac)? {
+            BuiltinMacro::Raw(raw) => raw.lower(rust, js, names, Some(returning)),
+        }
+    }
+
+    pub(super) fn stmt_macro_expr(
+        expr: &ExprMacro,
+        rust: &mut TokenStream,
+        js: &mut Js,
+        names: &mut NameResolver,
+    ) -> syn::Result<()> {
+        match BuiltinMacro::parse(&expr.mac)? {
+            BuiltinMacro::Raw(raw) => {
+                // Keep discarded expressions in expression position, including
+                // fragments with a trailing JavaScript semicolon.
+                if raw.has_expression_source() {
+                    js.push_str("0, ");
+                }
+                raw.lower(rust, js, names, None)
+            }
+        }
+    }
+
     pub(super) fn stmt_macro(
         stmt_macro: &StmtMacro,
         rust: &mut TokenStream,
@@ -33,6 +63,16 @@ impl Expr {
         names: &mut NameResolver,
     ) -> syn::Result<()> {
         BuiltinMacro::parse(&stmt_macro.mac)?.lower(rust, js, names)
+    }
+}
+
+pub(super) fn contains_await(mac: &Macro) -> bool {
+    if let Ok(BuiltinMacro::Raw(raw)) = BuiltinMacro::parse(mac) {
+        raw.rust
+            .as_ref()
+            .is_some_and(super::contains_await::ContainsAwait::in_expr)
+    } else {
+        false
     }
 }
 
@@ -62,7 +102,36 @@ impl BuiltinMacro {
         names: &mut NameResolver,
     ) -> syn::Result<()> {
         match self {
-            Self::Raw(raw) => raw.lower(rust, js, names),
+            Self::Raw(raw) => raw.lower(rust, js, names, None),
+        }
+    }
+}
+
+pub(super) enum RawReturn<'a> {
+    Boxed,
+    Break(&'a str),
+    Return(&'a str),
+}
+
+impl RawReturn<'_> {
+    fn prefix(&self, js: &mut Js) {
+        match self {
+            Self::Boxed => js.push_str("return { __proto__: null, value: ("),
+            Self::Break(marker) | Self::Return(marker) => {
+                write!(js, "{marker}.value = (").unwrap();
+            }
+        }
+    }
+
+    fn suffix(&self, js: &mut Js) {
+        match self {
+            Self::Boxed => js.push_str(") };\n"),
+            Self::Break(marker) => {
+                writeln!(js, "); {marker}.continuing = false; throw {marker};").unwrap();
+            }
+            Self::Return(marker) => {
+                writeln!(js, "); throw {marker};").unwrap();
+            }
         }
     }
 }
@@ -98,13 +167,66 @@ impl Parse for RawMacro {
 }
 
 impl RawMacro {
+    fn has_expression_source(&self) -> bool {
+        let source = self.js.value();
+        let mut rest = source.as_str();
+        loop {
+            rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+            // The browser's Function constructor accepts legacy HTML comments.
+            if let Some(comment) = rest
+                .strip_prefix("//")
+                .or_else(|| rest.strip_prefix("<!--"))
+                .or_else(|| rest.strip_prefix("-->"))
+            {
+                let end = comment
+                    .find(['\n', '\r', '\u{2028}', '\u{2029}'])
+                    .unwrap_or(comment.len());
+                rest = &comment[end..];
+            } else if let Some(comment) = rest.strip_prefix("/*") {
+                let Some(end) = comment.find("*/") else {
+                    return true;
+                };
+                rest = &comment[end + 2..];
+            } else {
+                let is_declaration = ress::Scanner::new(rest).next().is_some_and(|item| {
+                    item.is_ok_and(|item| {
+                        ["let", "const", "var"]
+                            .iter()
+                            .any(|keyword| item.token.matches_keyword_str(keyword))
+                    })
+                });
+                return !rest.is_empty() && !rest.starts_with(';') && !is_declaration;
+            }
+        }
+    }
+
     fn lower(
         &self,
         rust: &mut TokenStream,
         js: &mut Js,
         names: &mut NameResolver,
+        returning: Option<RawReturn<'_>>,
     ) -> syn::Result<()> {
-        self.interpolate_js(js, names)?;
+        let source = self.js.value();
+        if let Some(returning) = returning {
+            returning.prefix(js);
+            let end = if let Some(value) = self.return_source(&source)? {
+                js.push_str("(\n");
+                self.interpolate_js(value, js, names)?;
+                js.push_str("\n)");
+                value.len()
+            } else {
+                js.push_str("undefined");
+                0
+            };
+            returning.suffix(js);
+            // Keep unreachable declarations and captures in the original scope.
+            self.interpolate_js(&source[end..], js, names)?;
+        } else {
+            self.interpolate_js(&source, js, names)?;
+        }
+        // End line comments before appending generated code.
+        js.push('\n');
 
         match &self.rust {
             Some(rust_expr) => {
@@ -133,9 +255,52 @@ impl RawMacro {
         Ok(())
     }
 
-    fn interpolate_js(&self, js: &mut Js, names: &mut NameResolver) -> syn::Result<()> {
-        let input = self.js.value();
-        let mut rest = input.as_str();
+    /// The source consumed by a return, excluding its JavaScript terminator.
+    fn return_source<'a>(&self, source: &'a str) -> syn::Result<Option<&'a str>> {
+        let mut depth = 0usize;
+        let mut started = false;
+        for item in ress::Scanner::new(source) {
+            let item = item.map_err(|error| syn::Error::new(self.js.span(), error.to_string()))?;
+            let token = item.token;
+            if token.is_comment() || token.is_eof() {
+                continue;
+            }
+            if !started {
+                // A line terminator before the value ends a JavaScript return.
+                if token.matches_punct_str(";")
+                    || source[..item.span.start].contains(['\n', '\r', '\u{2028}', '\u{2029}'])
+                {
+                    return Ok(None);
+                }
+                started = true;
+            }
+            if token.matches_punct_str(";") && depth == 0 {
+                return Ok(Some(&source[..item.span.start]));
+            }
+            if (token.is_template_head() && !token.is_template_no_sub())
+                || token.matches_punct_str("(")
+                || token.matches_punct_str("[")
+                || token.matches_punct_str("{")
+            {
+                depth += 1;
+            } else if (token.is_template_tail() && !token.is_template_no_sub())
+                || token.matches_punct_str(")")
+                || token.matches_punct_str("]")
+                || token.matches_punct_str("}")
+            {
+                depth = depth.saturating_sub(1);
+            }
+        }
+        Ok(started.then_some(source))
+    }
+
+    fn interpolate_js(
+        &self,
+        input: &str,
+        js: &mut Js,
+        names: &mut NameResolver,
+    ) -> syn::Result<()> {
+        let mut rest = input;
 
         while let Some(start) = rest.find("${") {
             js.push_str(&rest[..start]);
