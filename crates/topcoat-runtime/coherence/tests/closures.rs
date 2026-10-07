@@ -110,6 +110,21 @@ fn local_closures_preserve_scope_and_call_semantics() {
 }
 
 #[test]
+fn local_closure_returns_and_loop_jumps_stay_in_their_scope() {
+    coherent!({
+        let echo = |value: String| -> String {
+            while true {
+                break;
+            }
+            return value;
+        };
+        let first = echo("first".to_owned());
+        let second = echo("second".to_owned());
+        (first, second)
+    });
+}
+
+#[test]
 fn nested_async_closures_preserve_arguments_after_suspension() {
     let ready = Awaitable::ready("sentinel".to_owned()).after_yield();
     coherent!(async => {
@@ -118,6 +133,18 @@ fn nested_async_closures_preserve_arguments_after_suspension() {
             (identity(first), second.await)
         };
         run("first".to_owned(), ready).await
+    });
+}
+
+#[test]
+fn local_async_closures_return_after_suspension() {
+    let ready = Awaitable::ready("sentinel".to_owned()).after_yield();
+    coherent!(async => {
+        let run = async |value| {
+            let result = value.await;
+            return result;
+        };
+        run(ready).await
     });
 }
 

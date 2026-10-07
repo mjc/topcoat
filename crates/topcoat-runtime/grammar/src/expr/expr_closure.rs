@@ -59,10 +59,10 @@ impl Expr {
             SynExpr::Block(block) => Self::block(&block.block, &mut body, js, names)?,
             other => Self::dispatch(other, &mut body, js, names)?,
         }
+        names.pop_scope();
         if deferred {
             js.push(')');
         }
-        names.pop_scope();
 
         let output = match &closure.output {
             syn::ReturnType::Default => TokenStream::new(),

@@ -23,6 +23,16 @@ pub(super) enum LocalBindingKind {
     Closure,
 }
 
+impl LocalBindingKind {
+    pub(super) fn for_expr(expr: &syn::Expr, names: &NameResolver) -> Self {
+        if names.is_closure(expr) {
+            Self::Closure
+        } else {
+            Self::Surrogate
+        }
+    }
+}
+
 pub(super) struct ExternalBinding {
     pub(super) value: TokenStream,
     pub(super) rust_ident: Ident,
@@ -168,21 +178,13 @@ impl NameResolver {
                         .init
                         .as_ref()
                         .map_or(LocalBindingKind::Surrogate, |init| {
-                            names.binding_kind(&init.expr)
+                            LocalBindingKind::for_expr(&init.expr, &names)
                         });
                     names.bind_local(&pat.ident, String::new(), kind).unwrap();
                 }
             }
         }
         matches!(block.stmts.last(), Some(syn::Stmt::Expr(expr, None)) if names.is_closure(expr))
-    }
-
-    pub(super) fn binding_kind(&self, expr: &syn::Expr) -> LocalBindingKind {
-        if self.is_closure(expr) {
-            LocalBindingKind::Closure
-        } else {
-            LocalBindingKind::Surrogate
-        }
     }
 
     pub(super) fn externals(&self) -> &[ExternalBinding] {
