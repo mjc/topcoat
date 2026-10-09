@@ -5,9 +5,13 @@
 //! a page or shard. The server dispatches it as a connected render and sends
 //! the content back as frames, each tagged with its run.
 
+#[path = "common/markers.rs"]
+mod markers;
+
 use std::{io, net::SocketAddr, sync::LazyLock, time::Duration};
 
 use futures_util::{SinkExt, StreamExt};
+use markers::last_signal_id;
 use tokio::{
     net::TcpListener,
     sync::{Notify, oneshot},
@@ -295,15 +299,6 @@ async fn next_frame(client: &mut Client, run: u64) -> serde_json::Value {
     message["frame"].take()
 }
 
-/// Finds the last signal declaration in `html` and returns its id.
-fn last_signal_id(html: &str) -> &str {
-    let declaration = html.rfind("::topcoat::signal(").expect(html);
-    let key = "&quot;id&quot;:&quot;";
-    let start = html[declaration..].find(key).expect(html) + declaration + key.len();
-    let end = html[start..].find("&quot;").expect(html) + start;
-    &html[start..end]
-}
-
 #[tokio::test]
 async fn a_page_run_renders_the_page_connected_and_streams_its_frames() {
     let (addr, shutdown_tx, server) = spawn_server().await;
@@ -478,7 +473,7 @@ async fn a_shard_run_restores_the_signal_values_it_is_sent() {
     let args = serde_json::json!(["news"]);
     request_shard_run(&mut client, 1, args.clone(), serde_json::json!({})).await;
     let snapshot = next_frame(&mut client, 1).await;
-    let id = last_signal_id(snapshot["html"].as_str().unwrap()).to_owned();
+    let id = last_signal_id(snapshot["html"].as_str().unwrap());
 
     request_shard_run(&mut client, 2, args, serde_json::json!({ id: 7 })).await;
     // Frames of the first run may still arrive before the second's.
@@ -525,7 +520,7 @@ async fn a_page_run_restores_the_signal_values_it_is_sent() {
 
     request_page_run(&mut client, 1, "/room", serde_json::json!({})).await;
     let snapshot = next_frame(&mut client, 1).await;
-    let id = last_signal_id(snapshot["html"].as_str().unwrap()).to_owned();
+    let id = last_signal_id(snapshot["html"].as_str().unwrap());
     let _swap = next_frame(&mut client, 1).await;
 
     request_page_run(

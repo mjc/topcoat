@@ -7,8 +7,12 @@
 //! id on both paths. A signal passed as an argument arrives as its id and
 //! current value, and the endpoint rebuilds it from them.
 
+#[path = "common/markers.rs"]
+mod markers;
+
 use std::{future::poll_fn, pin::pin};
 
+use markers::{last_signal, last_signal_id};
 use topcoat::{
     Result,
     context::Cx,
@@ -125,15 +129,6 @@ fn scope_marker(html: &str) -> (&str, &str) {
     let shard = args.nth(1).expect(html);
     let identity = args.nth(1).expect(html);
     (shard, identity)
-}
-
-/// The id of the last signal declared in `html`.
-fn last_signal_id(html: &str) -> &str {
-    let declaration = html.rfind("::topcoat::signal(").expect(html);
-    let key = "&quot;id&quot;:&quot;";
-    let start = html[declaration..].find(key).expect(html) + declaration + key.len();
-    let end = html[start..].find("&quot;").expect(html) + start;
-    &html[start..end]
 }
 
 /// Requests a shard render at its served URL and supplies its invocation
@@ -390,11 +385,11 @@ async fn a_rerender_resumes_signals_from_the_values_it_carries() {
     let inline = view! { cx => host() }.single().await.unwrap().render(cx);
     let (_, identity) = scope_marker(&inline);
     let id = last_signal_id(&inline);
-    assert!(inline.contains("&quot;v&quot;:0.0"), "{inline}");
+    assert_eq!(last_signal(&inline)["v"], 0.0);
 
     let rerendered = rerender(identity, &format!(r#"{{"{id}":7.0}}"#)).await;
 
-    assert!(rerendered.contains("&quot;v&quot;:7.0"), "{rerendered}");
+    assert_eq!(last_signal(&rerendered)["v"], 7.0);
     assert!(rerendered.contains("-->7<!--"), "{rerendered}");
 }
 
