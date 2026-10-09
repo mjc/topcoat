@@ -3,8 +3,12 @@
 //! A `POST` with `X-Topcoat-Runtime: true` becomes a `GET` at the same URL.
 //! The page's signals resume from the values supplied by the client.
 
+#[path = "common/markers.rs"]
+mod markers;
+
 use std::sync::{Arc, Mutex};
 
+use markers::last_signal_id;
 use topcoat::{
     Result,
     context::{Cx, app_context},
@@ -133,15 +137,6 @@ async fn rerun(router: &Router, path: &str, body: &str) -> (u16, String) {
         (RUNTIME_HEADER.as_str(), "true"),
     ];
     send(router, "POST", path, &headers, body).await
-}
-
-/// The id of the last signal declared in `html`.
-fn last_signal_id(html: &str) -> &str {
-    let declaration = html.rfind("::topcoat::signal(").expect(html);
-    let key = "&quot;id&quot;:&quot;";
-    let start = html[declaration..].find(key).expect(html) + declaration + key.len();
-    let end = html[start..].find("&quot;").expect(html) + start;
-    &html[start..end]
 }
 
 #[tokio::test]
