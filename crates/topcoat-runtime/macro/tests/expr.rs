@@ -351,25 +351,34 @@ async fn push_str_accepts_the_owned_string_from_an_event() {
 
 /// A captured value is serialized into the marker comment that carries the
 /// expression source, so its bytes must not be able to close that comment
-/// early. The `>` of any `-->` in the value renders as an entity, and the
-/// snapshot between the markers is escaped for its text position.
+/// early. Comment JSON escapes angle brackets, while the snapshot between
+/// markers is escaped for its text position.
 #[tokio::test]
 async fn a_captured_value_cannot_break_out_of_its_marker_comment() {
     let cx = &Cx::default();
-    let spicy = String::from(r#"-->"<&"#);
+    let spicy = String::from(r#"-->"<&<b>tag</b>&quot;"#);
     let html = view! { cx => captured_text(text: spicy) }
         .single()
         .await
         .unwrap()
         .render(cx);
 
-    // The capture reaches the client as a hydrated JSON value.
+    // The complete expression source is JSON encoded inside the comment.
+    let marker = html
+        .split("::topcoat::expr::start-json(")
+        .nth(1)
+        .and_then(|marker| marker.split(")-->").next())
+        .expect(&html);
+    assert!(marker.contains(r"\u003e"), "{marker}");
+    assert!(marker.contains(r"\u003c"), "{marker}");
+    assert!(marker.contains("&quot;"), "{marker}");
+    let source: String = serde_json::from_str(marker).expect(marker);
+    assert!(source.contains("<b>tag</b>&quot;"), "{source}");
+    // The rendered snapshot of the value is escaped for text.
     assert!(
-        html.contains(r"cx.hydrate(&quot;--&gt;\&quot;<&amp;&quot;)"),
+        html.contains(r#"-->--&gt;"&lt;&amp;&lt;b&gt;tag&lt;/b&gt;&amp;quot;<!--"#),
         "{html}"
     );
-    // The rendered snapshot of the value is escaped for text.
-    assert!(html.contains(r#"-->--&gt;"&lt;&amp;<!--"#), "{html}");
     // The raw value appears nowhere in the document.
     assert!(!html.contains(r#"-->"<&"#), "{html}");
 }
@@ -569,7 +578,7 @@ async fn signal_reads_and_raw_fallbacks_keep_bindings_but_not_server_dependencie
         .unwrap()
         .render(cx);
 
-    assert!(html.contains("::topcoat::expr::start("), "{html}");
+    assert!(html.contains("::topcoat::expr::start-json("), "{html}");
     assert!(html.contains("data-topcoat-bind:value="), "{html}");
     assert!(html.contains("data-topcoat-on:click="), "{html}");
     assert!(html.contains("data-topcoat-on:input="), "{html}");

@@ -349,7 +349,7 @@ async fn a_live_shard_streams_its_updates_with_the_page_run() {
     let region_start = html
         .find(&format!("::topcoat::region::start({region})"))
         .expect(html);
-    let shard_start = html.find("::topcoat::shard::start(").expect(html);
+    let shard_start = html.find("::topcoat::shard::start-json(").expect(html);
     let shard_end = html.find("::topcoat::shard::end(").expect(html);
     assert!(
         shard_start < region_start && region_start < shard_end,
@@ -379,7 +379,7 @@ async fn a_shard_run_on_a_page_connection_renders_the_shard_endpoint_connected()
     assert!(html.contains("news connected: true"), "{html}");
     assert!(html.contains("<!--::topcoat::connect-->"), "{html}");
     // The endpoint renders the shard's content without its scope markers.
-    assert!(!html.contains("::topcoat::shard::start("), "{html}");
+    assert!(!html.contains("::topcoat::shard::start-json("), "{html}");
     let swap = next_frame(&mut client, 1).await;
     assert_eq!(swap["t"], "swap");
     assert_eq!(swap["html"], "<p>pushed</p>");
