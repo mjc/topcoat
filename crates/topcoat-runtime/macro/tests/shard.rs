@@ -120,15 +120,16 @@ fn region_id(html: &str) -> &str {
     start.split_once(")-->").expect(html).0
 }
 
-/// Extracts the endpoint URL and invocation identity from a shard start marker.
-fn scope_marker(html: &str) -> (&str, &str) {
-    let start = html.find("::topcoat::shard::start(").expect(html);
-    // The marker's quoted arguments alternate with the separators between
-    // them: the shard path, then the identity.
-    let mut args = html[start..].split('"');
-    let shard = args.nth(1).expect(html);
-    let identity = args.nth(1).expect(html);
-    (shard, identity)
+/// Extracts the endpoint URL, invocation identity, and argument sources.
+fn scope_marker(html: &str) -> (String, String, Vec<String>) {
+    let payload = html
+        .split_once("::topcoat::shard::start-json(")
+        .expect(html)
+        .1
+        .split_once(")-->")
+        .expect(html)
+        .0;
+    serde_json::from_str(payload).expect(html)
 }
 
 /// Requests a shard render at its served URL and supplies its invocation
@@ -187,7 +188,7 @@ async fn a_live_shard_streams_its_updates_through_the_enclosing_content() {
     // updates to the shard.
     assert!(html.contains("<p>first</p>"), "{html}");
     assert!(!html.contains("<p>second</p>"), "{html}");
-    let shard_start = html.find("::topcoat::shard::start(").expect(&html);
+    let shard_start = html.find("::topcoat::shard::start-json(").expect(&html);
     let shard_end = html.find("::topcoat::shard::end(").expect(&html);
     let region_start = html.find("::topcoat::region::start(").expect(&html);
     assert!(
@@ -209,13 +210,13 @@ async fn a_live_shard_streams_its_updates_through_the_enclosing_content() {
 async fn a_live_shard_streams_its_updates_through_its_endpoint() {
     let cx = &Cx::default();
     let (inline, _) = drive(cx, view! { cx => region_probe() }).await;
-    let (_, identity) = scope_marker(&inline);
+    let (_, identity, _) = scope_marker(&inline);
     let region = region_id(&inline);
 
     // The re-render derives the same region id, so its update targets the
     // region the browser already shows, and streams the update after the
     // first content.
-    let rerendered = rerender_with(&region_probe, identity, "[]", "{}").await;
+    let rerendered = rerender_with(&region_probe, &identity, "[]", "{}").await;
     assert!(
         rerendered.contains(&format!("<!--::topcoat::region::start({region})-->")),
         "{rerendered}"
@@ -232,11 +233,11 @@ async fn a_live_shard_streams_its_updates_through_its_endpoint() {
 async fn a_live_shard_endpoint_sends_frames_to_a_request_accepting_them() {
     let cx = &Cx::default();
     let (inline, _) = drive(cx, view! { cx => region_probe() }).await;
-    let (_, identity) = scope_marker(&inline);
+    let (_, identity, _) = scope_marker(&inline);
     let region = region_id(&inline);
 
     let body = Body::from(r#"{"args":[],"signals":{}}"#);
-    let response = endpoint_accepting(&region_probe, identity, body, "application/x-ndjson").await;
+    let response = endpoint_accepting(&region_probe, &identity, body, "application/x-ndjson").await;
     assert_eq!(response.status(), http::StatusCode::OK);
     assert_eq!(
         response.headers().get("content-type").unwrap(),
@@ -273,13 +274,13 @@ async fn a_shard_without_arguments_accepts_the_browser_request() {
         .await
         .unwrap()
         .render(cx);
-    let (_, identity) = scope_marker(&inline);
+    let (_, identity, _) = scope_marker(&inline);
     let id = last_signal_id(&inline);
     let signals = format!(
         r#"{{"{id}":{{"t":"usize","bits":{},"v":"2"}}}}"#,
         usize::BITS,
     );
-    let rerendered = rerender_with(&without_arguments, identity, "[]", &signals).await;
+    let rerendered = rerender_with(&without_arguments, &identity, "[]", &signals).await;
     assert!(rerendered.contains("<p>2</p>"), "{rerendered}");
 }
 
@@ -291,7 +292,7 @@ async fn a_signal_argument_is_read_inline_and_rebuilt_from_its_value() {
         .await
         .unwrap()
         .render(cx);
-    let (shard, identity) = scope_marker(&inline);
+    let (shard, identity, _) = scope_marker(&inline);
     assert_eq!(shard, by_signal.path().as_str(), "{inline}");
     assert!(inline.contains("<p>shoes</p>"), "{inline}");
     // The tracked read inside the shard depends on the caller's signal.
@@ -302,7 +303,7 @@ async fn a_signal_argument_is_read_inline_and_rebuilt_from_its_value() {
     );
 
     let args = format!(r#"[{{"t":"Signal","id":"{id}","v":"boots"}}]"#);
-    let rerendered = rerender_with(&by_signal, identity, &args, "{}").await;
+    let rerendered = rerender_with(&by_signal, &identity, &args, "{}").await;
 
     assert!(rerendered.contains("<p>boots</p>"), "{rerendered}");
     assert!(
@@ -314,21 +315,31 @@ async fn a_signal_argument_is_read_inline_and_rebuilt_from_its_value() {
 #[tokio::test]
 async fn a_static_argument_keeps_its_javascript_for_rerenders() {
     let cx = &Cx::default();
-    let inline = view! { cx => stateful(label: String::from("constant")) }
+    let label = "--><b>tag</b>&quot;";
+    let inline = view! { cx => stateful(label: String::from(label)) }
         .single()
         .await
         .unwrap()
         .render(cx);
-    let (_, identity) = scope_marker(&inline);
+    let (_, identity, exprs) = scope_marker(&inline);
 
+    assert!(exprs[0].contains(label), "{exprs:?}");
+    let end_identity = serde_json::to_string(&identity).unwrap();
     assert!(
-        inline.contains("cx.hydrate(&quot;constant&quot;)"),
+        inline.contains(&format!("::topcoat::shard::end({end_identity})")),
         "{inline}"
     );
-    assert!(inline.contains("<p>constant "), "{inline}");
+    assert!(
+        inline.contains("<p>--&gt;&lt;b&gt;tag&lt;/b&gt;&amp;quot; "),
+        "{inline}"
+    );
 
-    let rerendered = rerender_with(&stateful, identity, r#"["constant"]"#, "{}").await;
-    assert!(rerendered.contains("<p>constant "), "{rerendered}");
+    let args = serde_json::to_string(&[label]).unwrap();
+    let rerendered = rerender_with(&stateful, &identity, &args, "{}").await;
+    assert!(
+        rerendered.contains("<p>--&gt;&lt;b&gt;tag&lt;/b&gt;&amp;quot; "),
+        "{rerendered}"
+    );
 }
 
 #[tokio::test]
@@ -339,17 +350,20 @@ async fn fixed_and_reactive_arguments_render_together() {
         .await
         .unwrap()
         .render(cx);
-    let (_, identity) = scope_marker(&inline);
+    let (_, identity, exprs) = scope_marker(&inline);
 
     assert!(inline.contains("<p>shoes 20</p>"), "{inline}");
     assert!(inline.contains(".get()"), "{inline}");
-    assert!(inline.contains("&quot;v&quot;:&quot;20&quot;"), "{inline}");
+    assert!(
+        exprs.iter().any(|expr| expr.contains(r#""v":"20""#)),
+        "{exprs:?}"
+    );
 
     let args = format!(
         r#"["boots",{{"t":"usize","bits":{},"v":"20"}}]"#,
         usize::BITS,
     );
-    let rerendered = rerender_with(&search_results, identity, &args, "{}").await;
+    let rerendered = rerender_with(&search_results, &identity, &args, "{}").await;
     assert!(rerendered.contains("<p>boots 20</p>"), "{rerendered}");
 }
 
@@ -367,10 +381,10 @@ async fn a_signal_argument_without_a_value_is_rejected() {
 async fn a_rerender_derives_the_same_signal_id_as_the_inline_render() {
     let cx = &Cx::default().keyed("host");
     let inline = view! { cx => host() }.single().await.unwrap().render(cx);
-    let (shard, identity) = scope_marker(&inline);
+    let (shard, identity, _) = scope_marker(&inline);
     assert_eq!(shard, stateful.path().as_str(), "{inline}");
 
-    let rerendered = rerender(identity, "{}").await;
+    let rerendered = rerender(&identity, "{}").await;
 
     assert_eq!(
         last_signal_id(&rerendered),
@@ -383,11 +397,11 @@ async fn a_rerender_derives_the_same_signal_id_as_the_inline_render() {
 async fn a_rerender_resumes_signals_from_the_values_it_carries() {
     let cx = &Cx::default().keyed("host");
     let inline = view! { cx => host() }.single().await.unwrap().render(cx);
-    let (_, identity) = scope_marker(&inline);
+    let (_, identity, _) = scope_marker(&inline);
     let id = last_signal_id(&inline);
     assert_eq!(last_signal(&inline)["v"], 0.0);
 
-    let rerendered = rerender(identity, &format!(r#"{{"{id}":7.0}}"#)).await;
+    let rerendered = rerender(&identity, &format!(r#"{{"{id}":7.0}}"#)).await;
 
     assert_eq!(last_signal(&rerendered)["v"], 7.0);
     assert!(rerendered.contains("-->7<!--"), "{rerendered}");
@@ -426,10 +440,10 @@ async fn a_shard_with_a_path_is_served_there_and_names_it_in_its_marker() {
         .await
         .unwrap()
         .render(cx);
-    let (shard, identity) = scope_marker(&inline);
+    let (shard, identity, _) = scope_marker(&inline);
     assert_eq!(shard, "/search/results", "{inline}");
 
-    let rerendered = rerender_with(&at_path, identity, r#"["boots"]"#, "{}").await;
+    let rerendered = rerender_with(&at_path, &identity, r#"["boots"]"#, "{}").await;
     assert!(rerendered.contains("<p>boots</p>"), "{rerendered}");
 }
 
@@ -441,12 +455,12 @@ async fn a_grouped_path_names_the_served_url_in_its_marker() {
         .await
         .unwrap()
         .render(cx);
-    let (shard, identity) = scope_marker(&inline);
+    let (shard, identity, _) = scope_marker(&inline);
     // The router strips the group from the URL it serves, so the browser
     // must request the stripped form.
     assert_eq!(shard, "/grouped", "{inline}");
 
-    let rerendered = rerender_with(&grouped, identity, r#"["boots"]"#, "{}").await;
+    let rerendered = rerender_with(&grouped, &identity, r#"["boots"]"#, "{}").await;
     assert!(rerendered.contains("<p>boots</p>"), "{rerendered}");
 }
 
