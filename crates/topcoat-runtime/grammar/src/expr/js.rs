@@ -12,6 +12,15 @@ pub(super) struct Js {
 }
 
 impl Js {
+    pub(super) fn append(&mut self, other: Self) {
+        if !other.parts.is_empty() {
+            let source = std::mem::take(&mut self.source);
+            quote! { .source(#source) }.to_tokens(&mut self.parts);
+            self.parts.extend(other.parts);
+        }
+        self.source.push_str(&other.source);
+    }
+
     pub(super) fn push_str(&mut self, source: &str) {
         self.source.push_str(source);
     }

@@ -16,5 +16,9 @@ tokio = { workspace = true, features = ["rt", "time"] }
 toml.workspace = true
 v8.workspace = true
 
+[dev-dependencies]
+topcoat-runtime-grammar.workspace = true
+syn = { workspace = true, features = ["full", "visit"] }
+
 [lints]
 workspace = true

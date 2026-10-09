@@ -13,13 +13,23 @@ impl Expr {
         js: &mut Js,
         names: &mut NameResolver,
     ) -> syn::Result<()> {
-        let mut cond = TokenStream::new();
-        js.push_str("while (");
-        Self::dispatch(&expr.cond, &mut cond, js, names)?;
-        js.push_str(".dehydrate()) ");
-        quote! { while #topcoat_runtime::Surrogate::into_real(#cond) }.to_tokens(rust);
+        Self::expr_while_inner(expr, rust, js, names, true)
+    }
 
-        Self::block(&expr.body, rust, js, names)?;
+    pub(super) fn expr_while_inner(
+        expr: &ExprWhile,
+        rust: &mut TokenStream,
+        js: &mut Js,
+        names: &mut NameResolver,
+        returns_value: bool,
+    ) -> syn::Result<()> {
+        if let Some(label) = &expr.label {
+            return Err(syn::Error::new_spanned(label, "labels are not supported"));
+        }
+        let (cond, body) =
+            Self::lower_loop(Some(&expr.cond), &expr.body, js, names, returns_value)?;
+        let token = &expr.while_token;
+        quote! { #token #topcoat_runtime::Surrogate::into_real(#cond) #body }.to_tokens(rust);
         Ok(())
     }
 }

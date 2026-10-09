@@ -4,6 +4,8 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use topcoat_core_grammar::paths::topcoat_runtime;
 
+use super::control_flow::ControlFlow;
+
 pub(super) enum ResolvedIdent {
     Local { js_name: String, rust_ident: Ident },
     External { rust_ident: Ident },
@@ -28,6 +30,7 @@ pub(super) struct ExternalBinding {
 
 #[derive(Default)]
 pub(super) struct NameResolver {
+    pub(super) control_flow: ControlFlow,
     scopes: Vec<HashMap<String, LocalBinding>>,
     externals: Vec<ExternalBinding>,
     external_by_name: HashMap<String, usize>,
