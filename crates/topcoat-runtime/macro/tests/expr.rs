@@ -188,6 +188,89 @@ async fn test_procedure(v: String) -> Result<String, std::convert::Infallible> {
     Ok(v)
 }
 
+#[component]
+async fn local_closure_button(cx: &Cx) -> Result<impl View> {
+    let selected = signal(cx, || "initial".to_owned());
+    Ok(view! {
+        <button
+            id="local-closure"
+            @click=$(|_e: Event| {
+                let second = |_first: String, second: String| -> String { second };
+                selected.set(second("discarded".to_owned(), "sentinel".to_owned()));
+            })
+        >
+            "Run"
+        </button>
+        <button
+            id="async-closure"
+            @click=$(async |_e: Event| {
+                let second = async |_first: String, second: String| -> String { second };
+                selected.set(
+                    second("discarded".to_owned(), "async sentinel".to_owned()).await,
+                );
+            })
+        >
+            "Run async"
+        </button>
+        <p id="closure-result">$(selected.get())</p>
+        <p id="server-result">
+            $({
+                let second = |_first: String, second: String| -> String { second };
+                second("discarded".to_owned(), "sentinel".to_owned())
+            })
+        </p>
+    })
+}
+
+#[tokio::test]
+async fn local_closure_calls_render_and_bind_an_event_handler() {
+    let cx = &Cx::default();
+    let html = view! { cx => local_closure_button() }
+        .single()
+        .await
+        .unwrap()
+        .render(cx);
+    assert!(html.contains("data-topcoat-on:click="), "{html}");
+    assert!(html.contains("id=\"server-result\">sentinel</p>"), "{html}");
+    assert!(html.contains("initial"), "{html}");
+}
+
+#[test]
+fn procedure_aliases_keep_the_procedure_call_protocol() {
+    let (_, js) = expr!(async || {
+        let save = test_procedure;
+        let alias = save;
+        let block_alias = {
+            let save = alias;
+            save
+        };
+        (block_alias)("sentinel".to_owned()).await
+    })
+    .into_evaluated_and_js();
+    assert!(js.to_source().contains(".call("));
+
+    let save = test_procedure;
+    let compiled = expr!({
+        let save = |value: String| value;
+        save("sentinel".to_owned())
+    });
+    assert_eq!(compiled.into_evaluated_and_js().0, "sentinel");
+    let (_, js) = expr!(async || save("sentinel".to_owned()).await).into_evaluated_and_js();
+    assert!(js.to_source().contains(".call("));
+}
+
+#[test]
+fn event_parameters_remain_borrowable_across_raw_fallbacks() {
+    let _handler = expr!(|event: Event| {
+        raw!("void 0;", {
+            std::hint::black_box(&event);
+        });
+        raw!("void 0;", {
+            std::hint::black_box(&event);
+        });
+    });
+}
+
 #[tokio::test]
 async fn procedure_call_inside_if_is_an_async_func() {
     let cx = &Cx::default();

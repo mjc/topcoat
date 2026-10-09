@@ -63,11 +63,22 @@ impl Expr {
     ) -> syn::Result<()> {
         let args = &call.args;
 
-        // `.call(...)` syntax
-        Self::dispatch(&call.func, rust, js, names)?;
-        *js += ".call";
-        quote! { .call }.to_tokens(rust);
-        Self::args(args, rust, js, names)?;
+        let procedure = !names.is_closure(&call.func);
+        let mut function = TokenStream::new();
+        js.push('(');
+        Self::dispatch(&call.func, &mut function, js, names)?;
+        js.push(')');
+        if procedure {
+            js.push_str(".call");
+        }
+
+        let mut arguments = TokenStream::new();
+        Self::args(args, &mut arguments, js, names)?;
+        if procedure {
+            quote! { (#function).call((#arguments)) }.to_tokens(rust);
+        } else {
+            quote! { (#function)(#arguments) }.to_tokens(rust);
+        }
 
         Ok(())
     }
@@ -88,7 +99,7 @@ impl Expr {
             quote! { , }.to_tokens(&mut tokens);
         }
         *js += ")";
-        quote! { ((#tokens)) }.to_tokens(rust);
+        tokens.to_tokens(rust);
         Ok(())
     }
 }
